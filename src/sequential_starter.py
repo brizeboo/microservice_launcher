@@ -1,6 +1,7 @@
 import threading
 import time
 import psutil
+import subprocess
 from health_checker import HealthChecker
 
 class SequentialStarter:
@@ -47,7 +48,7 @@ class SequentialStarter:
             
             try:
                 srv = psutil.win_service_get(service_name)
-                if srv.status() == psutil.STATUS_RUNNING:
+                if srv.status().lower() == "running":
                     return True
             except psutil.NoSuchProcess:
                 self.log_manager.log("System", "WARN", f"Windows service '{service_name}' not found.")
@@ -58,6 +59,20 @@ class SequentialStarter:
             time.sleep(1)
         
         return False
+
+    def _start_windows_service(self, service_name):
+        try:
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", f"Start-Service -Name '{service_name}'"],
+                capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                self.log_manager.log("System", "ERROR", f"Failed to start Windows service '{service_name}': {result.stderr.strip()}")
+                return False
+            return True
+        except Exception as e:
+            self.log_manager.log("System", "ERROR", f"Exception starting Windows service '{service_name}': {e}")
+            return False
 
     def _start_sequence(self, callback_on_complete):
         """
@@ -73,13 +88,21 @@ class SequentialStarter:
 
             name = service["service_name"]
             
-            # 检查 Windows 服务依赖
-            # Check Windows Service Dependency
             win_dep = service.get("windows_service_dependency")
             if win_dep:
-                self.log_manager.log("System", "INFO", f"Checking Windows Service dependency for {name}: {win_dep}...")
-                if not self._wait_for_windows_service(win_dep):
-                    self.log_manager.log("System", "ERROR", f"Windows Service '{win_dep}' is not running. Stopping sequence.")
+                deps = win_dep if isinstance(win_dep, list) else [win_dep]
+                for dep in deps:
+                    self.log_manager.log("System", "INFO", f"Checking Windows Service dependency for {name}: {dep}...")
+                    if not self._wait_for_windows_service(dep):
+                        self.log_manager.log("System", "WARN", f"Windows Service '{dep}' is not running. Attempting to start.")
+                        if self._start_windows_service(dep):
+                            if not self._wait_for_windows_service(dep, timeout=30):
+                                self.log_manager.log("System", "ERROR", f"Windows Service '{dep}' failed to reach running state. Stopping sequence.")
+                                break
+                        else:
+                            self.log_manager.log("System", "ERROR", f"Windows Service '{dep}' could not be started. Stopping sequence.")
+                            break
+                if self.stop_flag:
                     break
 
             self.log_manager.log("System", "INFO", f"Starting {name}...")

@@ -34,6 +34,10 @@
           "service_name": "示例服务A",
           "command": "D:/path/to/start.bat",
           "working_dir": "D:/path/to",
+          "environment": {
+            "PORT": "8080",
+            "DEBUG": "1"
+          },
           "health_check_type": "port",
           "health_check_config": {
             "host": "127.0.0.1",
@@ -41,8 +45,7 @@
           },
           "auto_restart": true,
           "max_restart_times": 5,
-          "restart_interval": 3,
-          "log_path": "D:/path/to/logs/service.log"
+          "restart_interval": 3
         }
       ]
     }

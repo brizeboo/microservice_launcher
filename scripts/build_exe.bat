@@ -17,8 +17,8 @@ if not exist %VENV_DIR% (
 REM 2. Install Dependencies
 echo [INFO] Installing dependencies...
 %VENV_DIR%\Scripts\python -m pip install --upgrade pip
-%VENV_DIR%\Scripts\pip install -r ..\requirements.txt
-%VENV_DIR%\Scripts\pip install pyinstaller
+%VENV_DIR%\Scripts\python -m pip install -r ..\requirements.txt
+%VENV_DIR%\Scripts\python -m pip install pyinstaller
 
 REM 3. Clean previous builds
 echo [INFO] Cleaning up previous build artifacts...
@@ -30,13 +30,13 @@ REM if exist *.spec del *.spec
 REM 4. Run PyInstaller
 echo [INFO] Building executable with PyInstaller...
 REM Using existing spec file for advanced configuration (version info, upx disabled)
-%VENV_DIR%\Scripts\pyinstaller --clean ServiceLauncher.spec
+%VENV_DIR%\Scripts\python -m PyInstaller --clean ServiceLauncher.spec
 
 REM 5. Report Success
-if exist dist\ServiceLauncher_v2.exe (
+if exist "dist\ServiceLauncher_v2.exe" (
+    powershell -NoProfile -Command "$ts=Get-Date -Format yyyyMMdd_HHmmss; $dest='ServiceLauncher_v2_'+$ts+'.exe'; if (Test-Path (Join-Path 'dist' $dest)) { $dest='ServiceLauncher_v2_'+$ts+'_'+(Get-Random -Maximum 10000)+'.exe' }; Rename-Item -LiteralPath 'dist\\ServiceLauncher_v2.exe' -NewName $dest; $p=(Get-Location).Path; Write-Host ('[OUTPUT] ' + (Join-Path $p ('dist\\'+$dest)))"
     echo.
     echo [SUCCESS] Build completed successfully!
-    echo [OUTPUT] %~dp0dist\ServiceLauncher_v2.exe
 ) else (
     echo.
     echo [ERROR] Build failed. Check the output above for errors.

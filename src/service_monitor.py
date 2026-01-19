@@ -1,5 +1,7 @@
 import time
 import threading
+import psutil
+import subprocess
 from health_checker import HealthChecker
 
 class ServiceMonitor:
@@ -82,12 +84,52 @@ class ServiceMonitor:
                     if check_type != "none":
                         health_status, _ = HealthChecker.check(check_type, service.get("health_check_config", {}))
 
+                dep_ok = True
+                win_dep = service.get("windows_service_dependency")
+                if win_dep:
+                    deps = win_dep if isinstance(win_dep, list) else [win_dep]
+                    for dep in deps:
+                        try:
+                            srv = psutil.win_service_get(dep)
+                            if srv.status().lower() != "running":
+                                self.log_manager.log("System", "WARN", f"Dependency Windows service '{dep}' not running for {name}. Attempting to start.")
+                                try:
+                                    result = subprocess.run(
+                                        ["powershell", "-NoProfile", "-NonInteractive", "-Command", f"Start-Service -Name '{dep}'"],
+                                        capture_output=True, text=True
+                                    )
+                                    if result.returncode != 0:
+                                        self.log_manager.log("System", "ERROR", f"Failed to start dependency '{dep}': {result.stderr.strip()}")
+                                        dep_ok = False
+                                    else:
+                                        start_time = time.time()
+                                        ok = False
+                                        while time.time() - start_time < 30:
+                                            srv = psutil.win_service_get(dep)
+                                            if srv.status().lower() == "running":
+                                                ok = True
+                                                break
+                                            time.sleep(1)
+                                        if not ok:
+                                            self.log_manager.log("System", "ERROR", f"Dependency '{dep}' did not reach running state.")
+                                            dep_ok = False
+                                except Exception as e:
+                                    self.log_manager.log("System", "ERROR", f"Exception starting dependency '{dep}': {e}")
+                                    dep_ok = False
+                        except psutil.NoSuchProcess:
+                            dep_ok = False
+                        except Exception:
+                            dep_ok = False
+
                 # 3. 确定状态
                 # 3. Determine Status
                 if not is_running:
                     new_status = "STOPPED"
                 elif not health_status:
                     new_status = "ERROR" # Running but unhealthy
+                elif not dep_ok:
+                    new_status = "ERROR"
+                    self.log_manager.log(name, "ERROR", "Dependency Windows service not running.")
                 else:
                     new_status = "RUNNING" # Running and healthy (or no check)
 

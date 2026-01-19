@@ -24,6 +24,7 @@ class ProcessManager:
         # Docker Compose style: 'command' and 'working_dir'
         command = service_config.get("command")
         working_dir = service_config.get("working_dir")
+        environment = service_config.get("environment")
         
         if not command:
             self.log_manager.log(service_name, "ERROR", "Configuration error: Missing 'command'.")
@@ -59,6 +60,23 @@ class ProcessManager:
             # If command is string and not a simple path, splitting it might be needed if shell=False.
             # But let's try to keep it simple. 
             
+            env = os.environ.copy()
+            if environment:
+                if isinstance(environment, dict):
+                    for k, v in environment.items():
+                        if k:
+                            env[str(k)] = "" if v is None else str(v)
+                elif isinstance(environment, list):
+                    for item in environment:
+                        if not isinstance(item, str):
+                            continue
+                        if "=" in item:
+                            k, v = item.split("=", 1)
+                            if k:
+                                env[str(k)] = str(v)
+                        else:
+                            env[str(item)] = env.get(str(item), "")
+
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
@@ -66,7 +84,8 @@ class ProcessManager:
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
                 text=True,
                 cwd=cwd,
-                shell=False # Keep it false for better control, user should provide list or executable string
+                shell=False,
+                env=env
             )
             
             self.processes[service_name] = process

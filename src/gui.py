@@ -431,8 +431,7 @@ class ServiceLauncherGUI:
             selection = listbox.curselection()
             if selection:
                 svc_name = listbox.get(selection[0])
-                # Insert snippet
-                snippet = f',\n      "windows_service_dependency": "{svc_name}"'
+                snippet = f',\n      "windows_service_dependency": ["{svc_name}"]'
                 text_widget.insert(tk.INSERT, snippet)
                 selector.destroy()
         
@@ -517,30 +516,20 @@ class ServiceLauncherGUI:
             ]
         }
         try:
-            file_path = filedialog.asksaveasfilename(
-                title=i18n.get("create_config"),
-                defaultextension=".json",
-                filetypes=[("JSON Files", "*.json")],
-                initialfile="services_config.json"
-            )
-            
-            if not file_path:
-                return
-                
+            if getattr(sys, "frozen", False):
+                exe_dir = os.path.dirname(sys.executable)
+            else:
+                exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+            file_path = os.path.join(exe_dir, "services.config")
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(default_config, f, indent=2, ensure_ascii=False)
-                
             self.config_manager.set_config_path(file_path)
             self.services = self.config_manager.get_services()
             self._rebuild_service_list_ui()
             self.monitor.update_services()
-            
             self._update_config_buttons_state()
             messagebox.showinfo(i18n.get("info"), i18n.get("config_loaded"))
-            
-            # Automatically open editor for the new file
             self._open_config_editor()
-            
         except Exception as e:
             messagebox.showerror(i18n.get("error"), str(e))
 

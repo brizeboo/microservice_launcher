@@ -45,10 +45,13 @@ Tkinter 界面更新需使用 after() 方法（避免线程安全问题）；
         "port": 8080,
         "timeout": 5
       },
+      "environment": {          // 环境变量
+        "PORT": "8080",
+        "DEBUG": "1"
+      },
       "auto_restart": true,      // 是否开启自动重启
       "max_restart_times": 5,    // 最大重启次数（0=无限）
-      "restart_interval": 3,     // 重启间隔（秒）
-      "log_path": "D:/microservice/A/logs/a_service.log" // 日志存储路径
+      "restart_interval": 3      // 重启间隔（秒）
     },
     {
       "service_name": "业务服务B",
@@ -61,10 +64,13 @@ Tkinter 界面更新需使用 after() 方法（避免线程安全问题）；
         "timeout": 5,
         "expected_code": 200
       },
+      "environment": [
+        "API_URL=http://127.0.0.1:8081",
+        "DEBUG=1"
+      ],
       "auto_restart": true,
       "max_restart_times": 3,
-      "restart_interval": 5,
-      "log_path": "D:/microservice/B/logs/b_service.log"
+      "restart_interval": 5
     }
   ]
 }
