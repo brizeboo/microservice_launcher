@@ -1,0 +1,815 @@
+import tkinter as tk
+from tkinter import ttk, scrolledtext, messagebox, filedialog
+import threading
+import time
+from datetime import datetime
+import psutil
+import sys
+import os
+import ctypes
+
+from config_manager import ServiceConfig
+from process_manager import ProcessManager
+from log_manager import LogManager
+from sequential_starter import SequentialStarter
+from health_checker import HealthChecker
+from i18n import i18n
+from service_monitor import ServiceMonitor
+
+class ServiceLauncherGUI:
+    def __init__(self, root, config_path=None):
+        """
+        初始化 GUI 应用程序。
+        Initialize the GUI application.
+        """
+        self.root = root
+        self.root.title(i18n.get("window_title"))
+        self.root.geometry("1000x700")
+
+        # 初始化管理器
+        # Initialize Managers
+        try:
+            self.config_manager = ServiceConfig(config_path)
+            self.log_manager = LogManager()
+            self.process_manager = ProcessManager(self.log_manager)
+            self.starter = SequentialStarter(self.config_manager, self.process_manager, self.log_manager)
+            self.monitor = ServiceMonitor(self.config_manager, self.process_manager, self.log_manager, self.starter)
+        except Exception as e:
+            messagebox.showerror(i18n.get("init_error"), str(e))
+            root.destroy()
+            return
+
+        self.services = self.config_manager.get_services()
+        
+        # 检查服务是否为空加载 - 可能意味着未找到配置
+        # Check if services loaded empty - might mean config not found
+        if not self.services and not os.path.exists(self.config_manager.config_path):
+             # Don't destroy, just warn or let user import
+             # messagebox.showwarning(i18n.get("info"), "Config file not found. Please import a config.")
+             pass
+
+        self.selected_service_for_log = "ALL"
+        self.log_filter_level = "ALL"
+
+        self._setup_ui()
+        self._refresh_ui_text() # Initial text set
+        
+        # 启动循环
+        # Start loops
+        self.running = True
+        self.monitor.start_monitoring()
+        
+        self._ui_update_loop()
+
+    def _setup_ui(self):
+        """
+        设置主 UI 组件。
+        Setup the main UI components.
+        """
+        # 主布局
+        # Main Layout
+        main_paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
+        main_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # 左侧面板 - 服务列表
+        # Left Panel - Service List
+        left_frame = ttk.Frame(main_paned, width=400)
+        main_paned.add(left_frame, weight=1)
+
+        # 右侧面板 - 日志
+        # Right Panel - Logs
+        right_frame = ttk.Frame(main_paned)
+        main_paned.add(right_frame, weight=2)
+
+        # --- 左侧面板内容 ---
+        # 顶部栏 - 语言选择
+        # --- Left Panel Content ---
+        # Top Bar for Language
+        lang_frame = ttk.Frame(left_frame)
+        lang_frame.pack(fill=tk.X, pady=5)
+        self.lbl_language = ttk.Label(lang_frame, text=i18n.get("language") + ":")
+        self.lbl_language.pack(side=tk.LEFT, padx=5)
+        
+        self.lang_var = tk.StringVar(value="zh")
+        self.combo_lang = ttk.Combobox(lang_frame, textvariable=self.lang_var, values=["en", "zh"], state="readonly", width=5)
+        self.combo_lang.pack(side=tk.LEFT)
+        self.combo_lang.bind("<<ComboboxSelected>>", self._on_language_change)
+        
+        self.lbl_service_list = ttk.Label(left_frame, text=i18n.get("service_list"), font=("Arial", 12, "bold"))
+        self.lbl_service_list.pack(pady=5)
+        
+        self.service_frame = ttk.Frame(left_frame)
+        self.service_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.service_widgets = {} # Map service_name -> {label, status_lbl, btn_start, btn_stop}
+
+        for idx, service in enumerate(self.services):
+            s_frame = ttk.Frame(self.service_frame, relief="groove", borderwidth=1)
+            s_frame.pack(fill=tk.X, pady=2, padx=2)
+            
+            name = service["service_name"]
+            
+            # 状态指示器 (色块)
+            # Status Indicator (Color Block)
+            status_lbl = tk.Label(s_frame, text="   ", bg="gray", width=4)
+            status_lbl.pack(side=tk.LEFT, padx=5)
+            
+            # 服务名称
+            # Service Name
+            # We need to store the reference to update text later if needed (though service names might not change)
+            # But "Order: X" needs translation
+            name_lbl = ttk.Label(s_frame, text="", width=25) 
+            name_lbl.pack(side=tk.LEFT, padx=5)
+
+            # 按钮
+            # Buttons
+            btn_frame = ttk.Frame(s_frame)
+            btn_frame.pack(side=tk.RIGHT, padx=5)
+            
+            start_btn = ttk.Button(btn_frame, text="Start", width=6, command=lambda n=name: self._manual_start(n))
+            start_btn.pack(side=tk.LEFT)
+            
+            stop_btn = ttk.Button(btn_frame, text="Stop", width=6, command=lambda n=name: self._manual_stop(n))
+            stop_btn.pack(side=tk.LEFT)
+            
+            restart_btn = ttk.Button(btn_frame, text="Rst", width=4, command=lambda n=name: self._manual_restart(n))
+            restart_btn.pack(side=tk.LEFT)
+
+            self.service_widgets[name] = {
+                "status_lbl": status_lbl,
+                "name_lbl": name_lbl,
+                "start_btn": start_btn,
+                "stop_btn": stop_btn,
+                "restart_btn": restart_btn
+            }
+
+        # --- 右侧面板内容 ---
+        # --- Right Panel Content ---
+        top_log_bar = ttk.Frame(right_frame)
+        top_log_bar.pack(fill=tk.X, pady=5)
+        
+        self.lbl_filter = ttk.Label(top_log_bar, text=i18n.get("filter"))
+        self.lbl_filter.pack(side=tk.LEFT, padx=5)
+        
+        self.log_service_var = tk.StringVar(value="ALL")
+        # We need to update these values if language changes for "ALL" and "System"? 
+        # Actually the values are used for logic. Display text can be different?
+        # OptionMenu is tricky to update. Let's stick to logical names for dropdown or just keep English keys?
+        # User asked for internationalization. "ALL" and "System" should be translated.
+        # But `log_service_var` is used for filtering. We can keep the internal value english?
+        # Or we rebuild the menu on language change.
+        self.option_menu_frame = ttk.Frame(top_log_bar)
+        self.option_menu_frame.pack(side=tk.LEFT)
+        self._build_log_filter_menu()
+
+        self.btn_clear = ttk.Button(top_log_bar, text=i18n.get("clear_logs"), command=self._clear_logs)
+        self.btn_clear.pack(side=tk.RIGHT, padx=5)
+        
+        self.btn_export = ttk.Button(top_log_bar, text=i18n.get("export"), command=self._export_logs)
+        self.btn_export.pack(side=tk.RIGHT, padx=5)
+
+        self.log_text = scrolledtext.ScrolledText(right_frame, state='disabled', height=20)
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+        
+        # 日志标签颜色
+        # Log Tags for Colors
+        self.log_text.tag_config("INFO", foreground="black")
+        self.log_text.tag_config("WARN", foreground="orange")
+        self.log_text.tag_config("ERROR", foreground="red")
+
+        # --- 底部面板 ---
+        # --- Bottom Panel ---
+        bottom_frame = ttk.Frame(self.root)
+        bottom_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        self.btn_start_all = ttk.Button(bottom_frame, text=i18n.get("start_all"), command=self._start_all)
+        self.btn_start_all.pack(side=tk.LEFT, padx=5)
+        
+        self.btn_stop_all = ttk.Button(bottom_frame, text=i18n.get("stop_all"), command=self._stop_all)
+        self.btn_stop_all.pack(side=tk.LEFT, padx=5)
+        
+        # Right Side Buttons (Packed in reverse order of appearance from right to left)
+        # Visual desired: [Import] [Edit] [Reload] [Install] [Uninstall] |
+        
+        self.btn_uninstall_svc = ttk.Button(bottom_frame, text=i18n.get("uninstall_service"), command=self._uninstall_service)
+        self.btn_uninstall_svc.pack(side=tk.RIGHT, padx=5)
+        
+        self.btn_install_svc = ttk.Button(bottom_frame, text=i18n.get("install_service"), command=self._install_service)
+        self.btn_install_svc.pack(side=tk.RIGHT, padx=5)
+
+        self.btn_reload = ttk.Button(bottom_frame, text=i18n.get("reload_config"), command=self._reload_config)
+        self.btn_reload.pack(side=tk.RIGHT, padx=5)
+
+        self.btn_edit_config = ttk.Button(bottom_frame, text=i18n.get("edit_config"), command=self._open_config_editor)
+        self.btn_edit_config.pack(side=tk.RIGHT, padx=5)
+        
+        self.btn_import = ttk.Button(bottom_frame, text=i18n.get("import_config"), command=self._import_config)
+        self.btn_import.pack(side=tk.RIGHT, padx=5)
+
+    def _build_log_filter_menu(self):
+        """
+        构建日志过滤下拉菜单。
+        Build the log filter dropdown menu.
+        """
+        # 销毁旧的
+        # Destroy old if exists
+        for widget in self.option_menu_frame.winfo_children():
+            widget.destroy()
+            
+        service_names = [i18n.get("all"), i18n.get("system")] + [s["service_name"] for s in self.services]
+        
+        # We need to map display name back to internal logic name if we translate them
+        # Logic names: "ALL", "System", "Service A"...
+        # Display names: "全部", "系统", "Service A"...
+        # Let's simplify: log_service_var holds the DISPLAY string. 
+        # When filtering, we check if it matches i18n.get("all") etc.
+        
+        current_val = self.log_service_var.get()
+        # If we switch language, current_val might be in old language. 
+        # We should reset to "ALL" (translated) or try to map it. 
+        # Resetting is safer.
+        self.log_service_var.set(i18n.get("all"))
+        
+        ttk.OptionMenu(self.option_menu_frame, self.log_service_var, i18n.get("all"), *service_names, command=self._on_log_filter_change).pack(side=tk.LEFT)
+
+    def _import_config(self):
+        """
+        导入配置文件。
+        Import configuration file.
+        """
+        file_path = filedialog.askopenfilename(
+            title=i18n.get("select_config"),
+            filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")]
+        )
+        if file_path:
+            try:
+                self.config_manager.set_config_path(file_path)
+                self.services = self.config_manager.get_services()
+                self._rebuild_service_list_ui() # Need to implement this
+                self.monitor.update_services()
+                self._update_config_buttons_state()
+                messagebox.showinfo(i18n.get("info"), i18n.get("config_loaded"))
+            except Exception as e:
+                messagebox.showerror(i18n.get("error"), str(e))
+
+    def _rebuild_service_list_ui(self):
+        """
+        重建服务列表 UI。
+        Rebuild the service list UI.
+        """
+        # 清除现有的
+        # Clear existing
+        for widget in self.service_frame.winfo_children():
+            widget.destroy()
+        self.service_widgets = {}
+
+        # 重建
+        # Rebuild
+        for idx, service in enumerate(self.services):
+            s_frame = ttk.Frame(self.service_frame, relief="groove", borderwidth=1)
+            s_frame.pack(fill=tk.X, pady=2, padx=2)
+            
+            name = service["service_name"]
+            
+            # Status Indicator (Color Block)
+            status_lbl = tk.Label(s_frame, text="   ", bg="gray", width=4)
+            status_lbl.pack(side=tk.LEFT, padx=5)
+            
+            # Service Name
+            name_lbl = ttk.Label(s_frame, text=name, width=25) 
+            name_lbl.pack(side=tk.LEFT, padx=5)
+
+            # Buttons
+            btn_frame = ttk.Frame(s_frame)
+            btn_frame.pack(side=tk.RIGHT, padx=5)
+            
+            start_btn = ttk.Button(btn_frame, text=i18n.get("start"), width=6, command=lambda n=name: self._manual_start(n))
+            start_btn.pack(side=tk.LEFT)
+            
+            stop_btn = ttk.Button(btn_frame, text=i18n.get("stop"), width=6, command=lambda n=name: self._manual_stop(n))
+            stop_btn.pack(side=tk.LEFT)
+            
+            restart_btn = ttk.Button(btn_frame, text=i18n.get("restart"), width=4, command=lambda n=name: self._manual_restart(n))
+            restart_btn.pack(side=tk.LEFT)
+
+            self.service_widgets[name] = {
+                "status_lbl": status_lbl,
+                "name_lbl": name_lbl,
+                "start_btn": start_btn,
+                "stop_btn": stop_btn,
+                "restart_btn": restart_btn
+            }
+        
+        self._build_log_filter_menu()
+
+    def _on_language_change(self, event):
+        """
+        处理语言更改事件。
+        Handle language change event.
+        """
+        new_lang = self.lang_var.get()
+        i18n.set_language(new_lang)
+        self._refresh_ui_text()
+
+    def _refresh_ui_text(self):
+        """
+        刷新 UI 文本以反映当前语言。
+        Refresh UI text to reflect current language.
+        """
+        self.root.title(i18n.get("window_title"))
+        self.lbl_language.config(text=i18n.get("language") + ":")
+        self.lbl_service_list.config(text=i18n.get("service_list"))
+        self.lbl_filter.config(text=i18n.get("filter"))
+        
+        self.btn_clear.config(text=i18n.get("clear_logs"))
+        self.btn_export.config(text=i18n.get("export"))
+        self.btn_start_all.config(text=i18n.get("start_all"))
+        self.btn_stop_all.config(text=i18n.get("stop_all"))
+        self.btn_reload.config(text=i18n.get("reload_config"))
+        self.btn_edit_config.config(text=i18n.get("edit_config"))
+        self.btn_install_svc.config(text=i18n.get("install_service"))
+        self.btn_uninstall_svc.config(text=i18n.get("uninstall_service"))
+        self.btn_import.config(text=i18n.get("import_config"))
+        
+        self._update_config_buttons_state()
+        
+        # Service Items
+        for name, widgets in self.service_widgets.items():
+            widgets["start_btn"].config(text=i18n.get("start"))
+            widgets["stop_btn"].config(text=i18n.get("stop"))
+            widgets["restart_btn"].config(text=i18n.get("restart"))
+            # Update name label
+            widgets["name_lbl"].config(text=name)
+
+        # Rebuild OptionMenu for logs
+        self._build_log_filter_menu()
+
+    # --- Actions ---
+    def _manual_start(self, service_name):
+        """
+        手动启动服务。
+        Manually start a service.
+        """
+        service = self.config_manager.get_service_by_name(service_name)
+        if service:
+            threading.Thread(target=self.process_manager.start_service, args=(service,), daemon=True).start()
+
+    def _manual_stop(self, service_name):
+        """
+        手动停止服务。
+        Manually stop a service.
+        """
+        threading.Thread(target=self.process_manager.stop_service, args=(service_name,), daemon=True).start()
+
+    def _manual_restart(self, service_name):
+        """
+        手动重启服务。
+        Manually restart a service.
+        """
+        def restart():
+            self.process_manager.stop_service(service_name)
+            time.sleep(1)
+            service = self.config_manager.get_service_by_name(service_name)
+            if service:
+                self.process_manager.start_service(service)
+        threading.Thread(target=restart, daemon=True).start()
+
+    def _show_win_service_selector(self, parent, text_widget):
+        """
+        显示 Windows 服务选择器对话框。
+        Show Windows Service selector dialog.
+        """
+        selector = tk.Toplevel(parent)
+        selector.title("Select Windows Service")
+        selector.geometry("400x500")
+        
+        # 搜索/过滤器
+        # Search/Filter
+        filter_frame = ttk.Frame(selector)
+        filter_frame.pack(fill=tk.X, padx=5, pady=5)
+        ttk.Label(filter_frame, text="Filter:").pack(side=tk.LEFT)
+        filter_var = tk.StringVar()
+        entry_filter = ttk.Entry(filter_frame, textvariable=filter_var)
+        entry_filter.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        # 列表框
+        # Listbox
+        list_frame = ttk.Frame(selector)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        listbox = tk.Listbox(list_frame, selectmode=tk.SINGLE)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
+        listbox.configure(yscrollcommand=scrollbar.set)
+        
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 加载服务
+        # Load services
+        all_services = []
+        try:
+            for s in psutil.win_service_iter():
+                try:
+                    all_services.append(s.name())
+                except: pass
+            all_services.sort()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to list services: {e}", parent=selector)
+            return
+
+        def update_list(*args):
+            search = filter_var.get().lower()
+            listbox.delete(0, tk.END)
+            for s in all_services:
+                if search in s.lower():
+                    listbox.insert(tk.END, s)
+        
+        filter_var.trace("w", update_list)
+        update_list()
+        
+        def on_select():
+            selection = listbox.curselection()
+            if selection:
+                svc_name = listbox.get(selection[0])
+                # Insert snippet
+                snippet = f',\n      "windows_service_dependency": "{svc_name}"'
+                text_widget.insert(tk.INSERT, snippet)
+                selector.destroy()
+        
+        btn_select = ttk.Button(selector, text="Select & Insert", command=on_select)
+        btn_select.pack(pady=5)
+
+    def _open_config_editor(self):
+        """
+        打开配置编辑器。
+        Open configuration editor.
+        """
+        if not os.path.exists(self.config_manager.config_path):
+             self._create_config()
+             return
+
+        editor = tk.Toplevel(self.root)
+        editor.title(i18n.get("edit_config"))
+        editor.geometry("600x500")
+        
+        # 文本区域
+        # Text Area
+        text_area = scrolledtext.ScrolledText(editor, wrap=tk.WORD, font=("Consolas", 10))
+        text_area.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # 加载内容
+        # Load Content
+        try:
+            with open(self.config_manager.config_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                text_area.insert(1.0, content)
+        except Exception as e:
+            messagebox.showerror(i18n.get("error"), str(e), parent=editor)
+            
+        # 按钮
+        # Buttons
+        btn_frame = ttk.Frame(editor)
+        btn_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        def save():
+            new_content = text_area.get(1.0, tk.END).strip()
+            try:
+                self.config_manager.save_config_content(new_content)
+                messagebox.showinfo(i18n.get("info"), i18n.get("config_saved"), parent=editor)
+                self._reload_config() # Refresh main UI
+                editor.destroy()
+            except ValueError as ve:
+                messagebox.showerror(i18n.get("error"), i18n.get("invalid_json", ve), parent=editor)
+            except Exception as e:
+                messagebox.showerror(i18n.get("error"), i18n.get("save_failed", e), parent=editor)
+        
+        def insert_win_service():
+            self._show_win_service_selector(editor, text_area)
+            
+        ttk.Button(btn_frame, text="Insert Win Service Dep", command=insert_win_service).pack(side=tk.LEFT, padx=5)
+                
+        ttk.Button(btn_frame, text=i18n.get("save"), command=save).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(btn_frame, text=i18n.get("cancel"), command=editor.destroy).pack(side=tk.RIGHT, padx=5)
+
+    def _update_config_buttons_state(self):
+        """
+        Update the state of configuration related buttons based on file existence.
+        """
+        exists = os.path.exists(self.config_manager.config_path)
+        if exists:
+            self.btn_edit_config.config(text=i18n.get("edit_config"))
+            self.btn_reload.config(state="normal")
+        else:
+            self.btn_edit_config.config(text=i18n.get("create_config"))
+            self.btn_reload.config(state="disabled")
+
+    def _create_config(self):
+        """
+        Create a new configuration file.
+        """
+        default_config = {
+            "services": [
+                {
+                    "service_name": "Example Service",
+                    "working_directory": "D:/path/to/service",
+                    "command": ["python", "app.py"]
+                }
+            ]
+        }
+        try:
+            file_path = filedialog.asksaveasfilename(
+                title=i18n.get("create_config"),
+                defaultextension=".json",
+                filetypes=[("JSON Files", "*.json")],
+                initialfile="services_config.json"
+            )
+            
+            if not file_path:
+                return
+                
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(default_config, f, indent=2, ensure_ascii=False)
+                
+            self.config_manager.set_config_path(file_path)
+            self.services = self.config_manager.get_services()
+            self._rebuild_service_list_ui()
+            self.monitor.update_services()
+            
+            self._update_config_buttons_state()
+            messagebox.showinfo(i18n.get("info"), i18n.get("config_loaded"))
+            
+            # Automatically open editor for the new file
+            self._open_config_editor()
+            
+        except Exception as e:
+            messagebox.showerror(i18n.get("error"), str(e))
+
+    def _start_all(self):
+        """
+        启动所有服务。
+        Start all services.
+        """
+        self.starter.start_all()
+
+    def _stop_all(self):
+        """
+        停止所有服务。
+        Stop all services.
+        """
+        self.starter.stop_sequence()
+        for s in self.services:
+            self._manual_stop(s["service_name"])
+
+    def _reload_config(self):
+        """
+        重新加载配置。
+        Reload configuration.
+        """
+        try:
+            self.config_manager.load_config()
+            self.services = self.config_manager.get_services()
+            self.monitor.update_services()
+            # Note: A full UI rebuild might be needed if services changed properly, 
+            # but for simplicity we just reload config values for existing logic.
+            # Rebuilding UI is complex dynamically, so we assume service list doesn't change 
+            # or require restart of tool for structure changes.
+            self._update_config_buttons_state()
+            messagebox.showinfo(i18n.get("info"), i18n.get("config_reloaded"))
+        except Exception as e:
+            self._update_config_buttons_state()
+            messagebox.showerror(i18n.get("error"), i18n.get("reload_failed", e))
+
+    def _clear_logs(self):
+        """
+        清除日志显示。
+        Clear log display.
+        """
+        self.log_text.config(state='normal')
+        self.log_text.delete(1.0, tk.END)
+        self.log_text.config(state='disabled')
+
+    def _export_logs(self):
+        """
+        导出日志到文件。
+        Export logs to file.
+        """
+        try:
+            with open("exported_logs.txt", "w", encoding="utf-8") as f:
+                f.write(self.log_text.get(1.0, tk.END))
+            messagebox.showinfo(i18n.get("info"), i18n.get("logs_exported"))
+        except Exception as e:
+            messagebox.showerror(i18n.get("error"), i18n.get("export_failed", e))
+
+    def _on_log_filter_change(self, val):
+        """
+        处理日志过滤器更改。
+        Handle log filter change.
+        """
+        self.selected_service_for_log = val
+        # Mapping logic if needed:
+        # If val is "全部" -> map to "ALL" for internal logic?
+        # But our logging logic in _ui_update_loop compares strings.
+        # If I change language, self.selected_service_for_log becomes "全部".
+        # But incoming logs have "service_name". 
+        # So "ALL" logic needs to handle translated string.
+        pass 
+
+    def _run_admin_command(self, action):
+        """
+        使用管理员权限运行应用程序本身以执行特定操作。
+        Run the application itself with admin privileges and specific action.
+        action: 'install' or 'remove'
+        """
+        if getattr(sys, 'frozen', False):
+            # Running as compiled exe
+            executable = sys.executable
+            # When running as service/installing, we assume the exe handles args.
+            # "install" arg triggers HandleCommandLine in main.py
+            args = f'{action}'
+        else:
+            # Running as script
+            executable = sys.executable
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            main_script = os.path.join(current_dir, "main.py")
+            args = f'"{main_script}" {action}'
+        
+        try:
+            # ShellExecuteW(hwnd, operation, file, parameters, directory, show_cmd)
+            # show_cmd: 1 (SW_SHOWNORMAL), 0 (SW_HIDE)
+            # We use 1 so user can see if any console output (though noconsole exe won't show)
+            cwd = os.getcwd()
+            ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", executable, args, cwd, 1)
+            return ret > 32
+        except Exception as e:
+            self.log_manager.log("System", "ERROR", f"Failed to run admin command: {e}")
+            return False
+
+    def _install_service(self):
+        """
+        安装 Windows 服务。
+        Install Windows Service.
+        """
+        # 如果是源码运行，优先使用脚本，因为它可以处理环境问题
+        # If running from source, prefer the batch script as it handles environment better
+        if not getattr(sys, 'frozen', False):
+            script_path = os.path.join(os.getcwd(), "scripts", "register_service.bat")
+            if os.path.exists(script_path):
+                try:
+                    # Run the batch file as admin
+                    # 批处理文件自己会处理提权，这里只需要运行它
+                    # The batch file handles elevation itself, just run it
+                    os.startfile(script_path)
+                    # 给予更多时间，因为脚本有多个步骤
+                    # Give it more time as script has multiple steps
+                    self.root.after(5000, self._check_service_installed)
+                    return
+                except Exception as e:
+                    self.log_manager.log("System", "ERROR", f"Failed to run batch script: {e}")
+                    # Fallback to default method
+        
+        # Use --startup auto to ensure it starts on boot
+        if self._run_admin_command("install --startup auto"):
+            # We can't know for sure if it succeeded instantly as it's async process
+            # But we can check if service exists after a delay
+            self.root.after(3000, self._check_service_installed)
+        else:
+            messagebox.showerror(i18n.get("error"), i18n.get("service_action_failed", "Privilege elevation failed"))
+
+    def _uninstall_service(self):
+        """
+        卸载 Windows 服务。
+        Uninstall Windows Service.
+        """
+        if not messagebox.askyesno(i18n.get("info"), i18n.get("confirm_uninstall")):
+            return
+            
+        # 如果是源码运行，优先使用脚本
+        # If running from source, prefer the batch script
+        if not getattr(sys, 'frozen', False):
+            script_path = os.path.join(os.getcwd(), "scripts", "unregister_service.bat")
+            if os.path.exists(script_path):
+                try:
+                    os.startfile(script_path)
+                    self.root.after(5000, self._check_service_uninstalled)
+                    return
+                except Exception as e:
+                    self.log_manager.log("System", "ERROR", f"Failed to run batch script: {e}")
+                    # Fallback
+            
+        # First stop it just in case
+        self._run_admin_command("stop")
+        time.sleep(1) 
+        
+        if self._run_admin_command("remove"):
+            self.root.after(3000, self._check_service_uninstalled)
+        else:
+            messagebox.showerror(i18n.get("error"), i18n.get("service_action_failed", "Privilege elevation failed"))
+
+    def _check_service_installed(self):
+        """
+        检查服务是否已安装。
+        Check if the service is installed.
+        """
+        try:
+            psutil.win_service_get("MicroserviceLauncher")
+            messagebox.showinfo(i18n.get("info"), i18n.get("service_installed"))
+            # Optionally start it?
+            # self._run_admin_command("start") 
+        except psutil.NoSuchProcess:
+            messagebox.showerror(i18n.get("error"), i18n.get("service_action_failed", "Service not found after installation"))
+        except Exception as e:
+            # It might exist but access denied? psutil usually allows query
+             messagebox.showerror(i18n.get("error"), i18n.get("service_action_failed", str(e)))
+
+    def _check_service_uninstalled(self):
+        """
+        检查服务是否已卸载。
+        Check if the service is uninstalled.
+        """
+        try:
+            psutil.win_service_get("MicroserviceLauncher")
+            # Still exists
+            messagebox.showerror(i18n.get("error"), i18n.get("service_action_failed", "Service still exists"))
+        except psutil.NoSuchProcess:
+            messagebox.showinfo(i18n.get("info"), i18n.get("service_uninstalled"))
+        except Exception as e:
+             messagebox.showerror(i18n.get("error"), i18n.get("service_action_failed", str(e)))
+
+    # --- Background Logic ---
+    # Moved to service_monitor.py
+    
+    def _ui_update_loop(self):
+        """
+        UI 更新循环，用于刷新日志和状态。
+        UI update loop to refresh logs and status.
+        """
+        # 更新日志
+        # Update Logs
+        logs = self.log_manager.get_gui_logs()
+        if logs:
+            self.log_text.config(state='normal')
+            for service, msg in logs:
+                # 过滤逻辑
+                # Filter logic
+                # self.selected_service_for_log can be "ALL", "全部", "System", "系统", "Service A"
+                
+                # Check if selected is ALL/全部
+                is_all = (self.selected_service_for_log == "ALL" or self.selected_service_for_log == i18n.get("all", "en") or self.selected_service_for_log == i18n.get("all", "zh"))
+                # But wait, i18n.get("all") returns current lang.
+                # If current lang is ZH, "all" is "全部".
+                
+                # If selected matches service name -> show
+                # If selected matches "System"/"系统" -> show if service is System
+                
+                show = False
+                if self.selected_service_for_log in ["ALL", "全部"]: # Hardcode both for safety or check against i18n
+                    show = True
+                elif self.selected_service_for_log == service:
+                    show = True
+                elif (self.selected_service_for_log in ["System", "系统"]) and service == "System":
+                    show = True
+                
+                if not show:
+                    continue
+                
+                # Insert with color
+                tag = "INFO"
+                if "ERROR" in msg: tag = "ERROR"
+                elif "WARN" in msg: tag = "WARN"
+                
+                self.log_text.insert(tk.END, msg + "\n", tag)
+            
+            # Keep only last 1000 lines
+            num_lines = int(self.log_text.index('end-1c').split('.')[0])
+            if num_lines > 1000:
+                self.log_text.delete(1.0, f"{num_lines-1000}.0")
+            
+            self.log_text.see(tk.END)
+            self.log_text.config(state='disabled')
+
+        # 更新状态颜色
+        # Update Status Colors
+        for name, status in self.monitor.service_status.items():
+            lbl = self.service_widgets.get(name, {}).get("status_lbl")
+            if lbl:
+                color = "gray"
+                if status == "RUNNING": color = "green"
+                elif status == "STARTING": color = "yellow"
+                elif status == "ERROR": color = "red"
+                lbl.config(bg=color)
+
+        self.root.after(500, self._ui_update_loop)
+
+    def on_close(self):
+        """
+        关闭应用程序并清理资源。
+        Close the application and cleanup resources.
+        """
+        self.running = False
+        self.monitor.stop_monitoring()
+        self.starter.stop_sequence()
+        # 终止所有进程
+        # Kill all processes
+        for service in self.services:
+            self.process_manager.stop_service(service["service_name"])
+        self.root.destroy()

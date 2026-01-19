@@ -1,0 +1,40 @@
+{
+  "services": [
+    {
+      "service_name": "Example Service 1 (Port Check)",
+      "command": "python -m http.server 8080",
+      "working_dir": "C:/path/to/service1",
+      "health_check_type": "port",
+      "health_check_config": {
+        "host": "127.0.0.1",
+        "port": 8080,
+        "timeout": 5
+      },
+      "restart": "always",
+      "max_restart_times": 5,
+      "restart_interval": 3,
+      "log_path": "C:/path/to/logs/service1.log"
+    },
+    {
+      "service_name": "Example Service 2 (HTTP Check & Dependency)",
+      "command": ["python", "app.py"],
+      "working_dir": "C:/path/to/service2",
+      "depends_on": ["Example Service 1 (Port Check)"],
+      "health_check_type": "http",
+      "health_check_config": {
+        "url": "http://127.0.0.1:5000/health",
+        "timeout": 5,
+        "expected_code": 200
+      },
+      "restart": "on-failure",
+      "max_restart_times": 3
+    },
+    {
+      "service_name": "Example Service 3 (Windows Service Dependency)",
+      "command": "my_script.bat",
+      "working_dir": "C:/path/to/service3",
+      "windows_service_dependency": "MSSQLSERVER",
+      "health_check_type": "none"
+    }
+  ]
+}

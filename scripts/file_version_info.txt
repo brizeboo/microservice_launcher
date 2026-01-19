@@ -1,0 +1,43 @@
+# UTF-8
+#
+# 关于固定文件信息 'ffi' 的更多详细信息，请参阅：
+# http://msdn.microsoft.com/en-us/library/ms646997.aspx
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    # filevers 和 prodvers 应该始终是包含四个项目的元组：(1, 2, 3, 4)
+    # 将不需要的项目设置为零 0。
+    filevers=(1, 0, 0, 0),
+    prodvers=(1, 0, 0, 0),
+    # 包含指定有效位 'flags' 的位掩码。
+    mask=0x3f,
+    # 包含指定文件布尔属性的位掩码。
+    flags=0x0,
+    # 此文件所针对的操作系统。
+    # 0x4 - NT，无需定义不同的操作系统类型。
+    OS=0x40004,
+    # 文件的常规类型。
+    # 0x1 - 该文件是一个应用程序。
+    fileType=0x1,
+    # 文件的功能。
+    # 0x0 - 未为此 fileType 定义功能
+    subtype=0x0,
+    # 创建日期和时间戳。
+    date=(0, 0)
+    ),
+  kids=[
+    StringFileInfo(
+      [
+      StringTable(
+        u'080404b0', # 0804=简体中文, 04b0=Unicode
+        [StringStruct(u'CompanyName', u'sykc'),
+        StringStruct(u'FileDescription', u'Microservice Launcher Service'),
+        StringStruct(u'FileVersion', u'1.0.0.0'),
+        StringStruct(u'InternalName', u'ServiceLauncher'),
+        StringStruct(u'LegalCopyright', u'Copyright (c) 2024 sykc'),
+        StringStruct(u'OriginalFilename', u'ServiceLauncher.exe'),
+        StringStruct(u'ProductName', u'Microservice Launcher'),
+        StringStruct(u'ProductVersion', u'1.0.0.0')])
+      ]),
+    VarFileInfo([VarStruct(u'Translation', [2052, 1200])]) # 2052=0x0804 (中文)
+  ]
+)
