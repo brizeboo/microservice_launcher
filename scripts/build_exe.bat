@@ -1,6 +1,10 @@
 @echo off
 cd /d "%~dp0"
 set VENV_DIR=..\.venv
+set WHEELS_DIR=..\vendor\wheels
+set PIP_PROXY_OPTION=
+if not "%HTTPS_PROXY%"=="" set PIP_PROXY_OPTION=--proxy "%HTTPS_PROXY%"
+if "%PIP_PROXY_OPTION%"=="" if not "%HTTP_PROXY%"=="" set PIP_PROXY_OPTION=--proxy "%HTTP_PROXY%"
 
 echo ==========================================
 echo      ServiceLauncher Build Script
@@ -16,9 +20,27 @@ if not exist %VENV_DIR% (
 
 REM 2. Install Dependencies
 echo [INFO] Installing dependencies...
-%VENV_DIR%\Scripts\python -m pip install --upgrade pip
-%VENV_DIR%\Scripts\python -m pip install -r ..\requirements.txt
-%VENV_DIR%\Scripts\python -m pip install pyinstaller
+echo [INFO] Using proxy: %PIP_PROXY_OPTION%
+if exist %WHEELS_DIR% (
+    echo [INFO] Offline mode: %WHEELS_DIR%
+    %VENV_DIR%\Scripts\python -m pip install --no-index --find-links %WHEELS_DIR% -r ..\requirements.txt
+    %VENV_DIR%\Scripts\python -m pip install --no-index --find-links %WHEELS_DIR% pyinstaller
+) else (
+    %VENV_DIR%\Scripts\python -m pip install -r ..\requirements.txt %PIP_PROXY_OPTION% --retries 2 --timeout 20
+    if errorlevel 1 (
+        if exist %WHEELS_DIR% (
+            echo [WARN] Network install failed, falling back to offline wheels...
+            %VENV_DIR%\Scripts\python -m pip install --no-index --find-links %WHEELS_DIR% -r ..\requirements.txt
+        )
+    )
+    %VENV_DIR%\Scripts\python -m pip install pyinstaller %PIP_PROXY_OPTION% --retries 2 --timeout 20
+    if errorlevel 1 (
+        if exist %WHEELS_DIR% (
+            echo [WARN] Network install failed, falling back to offline wheels...
+            %VENV_DIR%\Scripts\python -m pip install --no-index --find-links %WHEELS_DIR% pyinstaller
+        )
+    )
+)
 
 REM 3. Clean previous builds
 echo [INFO] Cleaning up previous build artifacts...
@@ -42,4 +64,6 @@ if exist "dist\ServiceLauncher_v2.exe" (
     echo [ERROR] Build failed. Check the output above for errors.
 )
 
-REM pause
+echo.
+echo push any button exit...
+pause >nul

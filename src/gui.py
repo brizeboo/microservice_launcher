@@ -7,6 +7,7 @@ import psutil
 import sys
 import os
 import ctypes
+import json
 
 from config_manager import ServiceConfig
 from process_manager import ProcessManager
@@ -23,13 +24,60 @@ class ServiceLauncherGUI:
         Initialize the GUI application.
         """
         self.root = root
+        if getattr(sys, "frozen", False):
+            exe_dir = os.path.dirname(sys.executable)
+        else:
+            exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        self.exe_dir = exe_dir
+        self.conf_dir = os.path.join(exe_dir, "conf")
+        os.makedirs(self.conf_dir, exist_ok=True)
+        self.logs_dir = os.path.join(exe_dir, "logs")
+        os.makedirs(self.logs_dir, exist_ok=True)
+        self.last_config_dat = os.path.join(self.conf_dir, "last_config.dat") 
+        lang_loaded = self._load_language_from_bat()
+        self.initial_lang = lang_loaded if lang_loaded in ["en", "zh"] else "zh"
+        i18n.set_language(self.initial_lang)
         self.root.title(i18n.get("window_title"))
         self.root.geometry("1000x700")
 
-        # 初始化管理器
+        self.default_config_path = os.path.join(self.conf_dir, "services.json")
+        initial_config_path = config_path
+        if not initial_config_path and os.path.exists(self.last_config_dat):
+            try:
+                with open(self.last_config_dat, "r", encoding="utf-8") as f:
+                    p = f.read().strip()
+                    if p:
+                        initial_config_path = p
+            except Exception:
+                initial_config_path = None
+        if not initial_config_path or not os.path.exists(initial_config_path):
+            if not os.path.exists(self.default_config_path):
+                default_config = {
+                    "services": [
+                        {
+                            "service_name": "Example Service",
+                            "working_dir": "D:/path/to/service",
+                            "command": ["python", "app.py"]
+                        }
+                    ]
+                }
+                with open(self.default_config_path, "w", encoding="utf-8") as f:
+                    json.dump(default_config, f, indent=2, ensure_ascii=False)
+            initial_config_path = self.default_config_path
+            try:
+                with open(self.last_config_dat, "w", encoding="utf-8") as f:
+                    f.write(initial_config_path)
+            except Exception:
+                pass
+        try:
+            with open(self.last_config_dat, "w", encoding="utf-8") as f:
+                f.write(initial_config_path)
+        except Exception:
+            pass
+
         # Initialize Managers
         try:
-            self.config_manager = ServiceConfig(config_path)
+            self.config_manager = ServiceConfig(initial_config_path)
             self.log_manager = LogManager()
             self.process_manager = ProcessManager(self.log_manager)
             self.starter = SequentialStarter(self.config_manager, self.process_manager, self.log_manager)
@@ -40,6 +88,13 @@ class ServiceLauncherGUI:
             return
 
         self.services = self.config_manager.get_services()
+        try:
+            self.log_manager.get_logger("System", os.path.join(self.logs_dir, "system.log"))
+            for s in self.services:
+                name = s["service_name"]
+                self.log_manager.get_logger(name, os.path.join(self.logs_dir, f"{name}.log"))
+        except Exception:
+            pass
         
         # 检查服务是否为空加载 - 可能意味着未找到配置
         # Check if services loaded empty - might mean config not found
@@ -50,6 +105,7 @@ class ServiceLauncherGUI:
 
         self.selected_service_for_log = "ALL"
         self.log_filter_level = "ALL"
+        self.log_keyword_var = tk.StringVar(value="")
 
         self._setup_ui()
         self._refresh_ui_text() # Initial text set
@@ -90,7 +146,7 @@ class ServiceLauncherGUI:
         self.lbl_language = ttk.Label(lang_frame, text=i18n.get("language") + ":")
         self.lbl_language.pack(side=tk.LEFT, padx=5)
         
-        self.lang_var = tk.StringVar(value="zh")
+        self.lang_var = tk.StringVar(value=getattr(self, "initial_lang", "zh"))
         self.combo_lang = ttk.Combobox(lang_frame, textvariable=self.lang_var, values=["en", "zh"], state="readonly", width=5)
         self.combo_lang.pack(side=tk.LEFT)
         self.combo_lang.bind("<<ComboboxSelected>>", self._on_language_change)
@@ -162,6 +218,10 @@ class ServiceLauncherGUI:
         self.option_menu_frame.pack(side=tk.LEFT)
         self._build_log_filter_menu()
 
+        ttk.Label(top_log_bar, text=i18n.get("keyword")).pack(side=tk.LEFT, padx=10)
+        self.entry_keyword = ttk.Entry(top_log_bar, textvariable=self.log_keyword_var, width=16)
+        self.entry_keyword.pack(side=tk.LEFT)
+
         self.btn_clear = ttk.Button(top_log_bar, text=i18n.get("clear_logs"), command=self._clear_logs)
         self.btn_clear.pack(side=tk.RIGHT, padx=5)
         
@@ -216,21 +276,53 @@ class ServiceLauncherGUI:
         for widget in self.option_menu_frame.winfo_children():
             widget.destroy()
             
-        service_names = [i18n.get("all"), i18n.get("system")] + [s["service_name"] for s in self.services]
-        
-        # We need to map display name back to internal logic name if we translate them
-        # Logic names: "ALL", "System", "Service A"...
-        # Display names: "全部", "系统", "Service A"...
-        # Let's simplify: log_service_var holds the DISPLAY string. 
-        # When filtering, we check if it matches i18n.get("all") etc.
-        
-        current_val = self.log_service_var.get()
-        # If we switch language, current_val might be in old language. 
-        # We should reset to "ALL" (translated) or try to map it. 
-        # Resetting is safer.
-        self.log_service_var.set(i18n.get("all"))
-        
-        ttk.OptionMenu(self.option_menu_frame, self.log_service_var, i18n.get("all"), *service_names, command=self._on_log_filter_change).pack(side=tk.LEFT)
+        display_items = [i18n.get("all"), i18n.get("system")] + [s["service_name"] for s in self.services]
+        # 显示->内部值映射
+        self._log_filter_value_map = {
+            i18n.get("all"): "ALL",
+            i18n.get("system"): "SYSTEM",
+        }
+        for s in self.services:
+            name = s["service_name"]
+            self._log_filter_value_map[name] = name
+
+        def to_display(val):
+            if val == "ALL":
+                return i18n.get("all")
+            if val == "SYSTEM":
+                return i18n.get("system")
+            return val
+
+        # 依据当前内部选择设置显示值
+        self.log_service_var.set(to_display(self.selected_service_for_log))
+        ttk.OptionMenu(self.option_menu_frame, self.log_service_var, to_display(self.selected_service_for_log), *display_items, command=self._on_log_filter_change).pack(side=tk.LEFT)
+
+    def _load_language_from_bat(self):
+        try:
+            if not os.path.exists(self.last_config_bat):
+                return None
+            with open(self.last_config_bat, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.lower().startswith("set "):
+                        kv = line[4:].strip()
+                        if "=" in kv:
+                            k, v = kv.split("=", 1)
+                            if k.strip().upper() == "LANG":
+                                lang = v.strip().lower()
+                                if lang in ["en", "zh"]:
+                                    return lang
+            return None
+        except Exception:
+            return None
+
+    def _save_language_to_bat(self):
+        try:
+            content = "@echo off\nset LANG={}".format(self.lang_var.get())
+            with open(self.last_config_bat, "w", encoding="utf-8") as f:
+                f.write(content)
+        except Exception:
+            pass
 
     def _import_config(self):
         """
@@ -249,6 +341,11 @@ class ServiceLauncherGUI:
                 self.monitor.update_services()
                 self._update_config_buttons_state()
                 messagebox.showinfo(i18n.get("info"), i18n.get("config_loaded"))
+                try:
+                    with open(self.last_config_dat, "w", encoding="utf-8") as f:
+                        f.write(file_path)
+                except Exception:
+                    pass
             except Exception as e:
                 messagebox.showerror(i18n.get("error"), str(e))
 
@@ -310,6 +407,7 @@ class ServiceLauncherGUI:
         new_lang = self.lang_var.get()
         i18n.set_language(new_lang)
         self._refresh_ui_text()
+        self._save_language_to_bat()
 
     def _refresh_ui_text(self):
         """
@@ -380,14 +478,14 @@ class ServiceLauncherGUI:
         Show Windows Service selector dialog.
         """
         selector = tk.Toplevel(parent)
-        selector.title("Select Windows Service")
+        selector.title(i18n.get("select_windows_service"))
         selector.geometry("400x500")
         
         # 搜索/过滤器
         # Search/Filter
         filter_frame = ttk.Frame(selector)
         filter_frame.pack(fill=tk.X, padx=5, pady=5)
-        ttk.Label(filter_frame, text="Filter:").pack(side=tk.LEFT)
+        ttk.Label(filter_frame, text=i18n.get("filter")).pack(side=tk.LEFT)
         filter_var = tk.StringVar()
         entry_filter = ttk.Entry(filter_frame, textvariable=filter_var)
         entry_filter.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
@@ -414,7 +512,7 @@ class ServiceLauncherGUI:
                 except: pass
             all_services.sort()
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to list services: {e}", parent=selector)
+            messagebox.showerror(i18n.get("error"), i18n.get("list_services_failed", e), parent=selector)
             return
 
         def update_list(*args):
@@ -435,7 +533,7 @@ class ServiceLauncherGUI:
                 text_widget.insert(tk.INSERT, snippet)
                 selector.destroy()
         
-        btn_select = ttk.Button(selector, text="Select & Insert", command=on_select)
+        btn_select = ttk.Button(selector, text=i18n.get("select_and_insert"), command=on_select)
         btn_select.pack(pady=5)
 
     def _open_config_editor(self):
@@ -485,7 +583,7 @@ class ServiceLauncherGUI:
         def insert_win_service():
             self._show_win_service_selector(editor, text_area)
             
-        ttk.Button(btn_frame, text="Insert Win Service Dep", command=insert_win_service).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text=i18n.get("insert_win_service_dep"), command=insert_win_service).pack(side=tk.LEFT, padx=5)
                 
         ttk.Button(btn_frame, text=i18n.get("save"), command=save).pack(side=tk.RIGHT, padx=5)
         ttk.Button(btn_frame, text=i18n.get("cancel"), command=editor.destroy).pack(side=tk.RIGHT, padx=5)
@@ -510,17 +608,13 @@ class ServiceLauncherGUI:
             "services": [
                 {
                     "service_name": "Example Service",
-                    "working_directory": "D:/path/to/service",
+                    "working_dir": "D:/path/to/service",
                     "command": ["python", "app.py"]
                 }
             ]
         }
         try:
-            if getattr(sys, "frozen", False):
-                exe_dir = os.path.dirname(sys.executable)
-            else:
-                exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-            file_path = os.path.join(exe_dir, "services.config")
+            file_path = self.default_config_path
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(default_config, f, indent=2, ensure_ascii=False)
             self.config_manager.set_config_path(file_path)
@@ -530,6 +624,11 @@ class ServiceLauncherGUI:
             self._update_config_buttons_state()
             messagebox.showinfo(i18n.get("info"), i18n.get("config_loaded"))
             self._open_config_editor()
+            try:
+                with open(self.last_config_dat, "w", encoding="utf-8") as f:
+                    f.write(file_path)
+            except Exception:
+                pass
         except Exception as e:
             messagebox.showerror(i18n.get("error"), str(e))
 
@@ -594,14 +693,11 @@ class ServiceLauncherGUI:
         处理日志过滤器更改。
         Handle log filter change.
         """
-        self.selected_service_for_log = val
-        # Mapping logic if needed:
-        # If val is "全部" -> map to "ALL" for internal logic?
-        # But our logging logic in _ui_update_loop compares strings.
-        # If I change language, self.selected_service_for_log becomes "全部".
-        # But incoming logs have "service_name". 
-        # So "ALL" logic needs to handle translated string.
-        pass 
+        try:
+            internal = self._log_filter_value_map.get(val, val)
+            self.selected_service_for_log = internal
+        except Exception:
+            self.selected_service_for_log = "ALL"
 
     def _run_admin_command(self, action):
         """
@@ -675,7 +771,7 @@ class ServiceLauncherGUI:
         # 如果是源码运行，优先使用脚本
         # If running from source, prefer the batch script
         if not getattr(sys, 'frozen', False):
-            script_path = os.path.join(os.getcwd(), "scripts", "unregister_service.bat")
+            script_path = os.path.join(os.getcwd(), "scripts", "unregister_service.dat")
             if os.path.exists(script_path):
                 try:
                     os.startfile(script_path)
@@ -740,31 +836,28 @@ class ServiceLauncherGUI:
             for service, msg in logs:
                 # 过滤逻辑
                 # Filter logic
-                # self.selected_service_for_log can be "ALL", "全部", "System", "系统", "Service A"
-                
-                # Check if selected is ALL/全部
-                is_all = (self.selected_service_for_log == "ALL" or self.selected_service_for_log == i18n.get("all", "en") or self.selected_service_for_log == i18n.get("all", "zh"))
-                # But wait, i18n.get("all") returns current lang.
-                # If current lang is ZH, "all" is "全部".
-                
-                # If selected matches service name -> show
-                # If selected matches "System"/"系统" -> show if service is System
-                
+                # 内部枚举: "ALL" / "SYSTEM" / 具体服务名
+                selected = self.selected_service_for_log
                 show = False
-                if self.selected_service_for_log in ["ALL", "全部"]: # Hardcode both for safety or check against i18n
+                if selected == "ALL":
                     show = True
-                elif self.selected_service_for_log == service:
-                    show = True
-                elif (self.selected_service_for_log in ["System", "系统"]) and service == "System":
-                    show = True
-                
+                elif selected == "SYSTEM":
+                    show = (service == "System")
+                else:
+                    show = (service == selected)
+
+                if not show:
+                    continue
+
+                # 关键字过滤
+                kw = self.log_keyword_var.get().strip()
+                if kw and kw.lower() not in msg.lower():
+                    continue
                 if not show:
                     continue
                 
                 # Insert with color
                 tag = "INFO"
-                if "ERROR" in msg: tag = "ERROR"
-                elif "WARN" in msg: tag = "WARN"
                 
                 self.log_text.insert(tk.END, msg + "\n", tag)
             

@@ -3,6 +3,7 @@ import psutil
 import threading
 import os
 import time
+import shutil
 
 class ProcessManager:
     def __init__(self, log_manager):
@@ -39,6 +40,9 @@ class ProcessManager:
         # 如果没有指定 working_dir，则默认为 None
         # Resolve working_dir if not absolute
         cwd = working_dir if working_dir else None
+        if cwd and not os.path.isdir(cwd):
+            self.log_manager.log(service_name, "ERROR", f"Working directory not found: {cwd}")
+            return False
         
         # 检查命令是否为可执行文件路径
         # If command is a file path, we can check existence (optional but good for debugging)
@@ -76,16 +80,51 @@ class ProcessManager:
                                 env[str(k)] = str(v)
                         else:
                             env[str(item)] = env.get(str(item), "")
+            if isinstance(command, list) and command:
+                exe = command[0]
+                base = cwd or os.getcwd()
+                if not os.path.isabs(exe):
+                    cand = os.path.join(base, exe)
+                    if os.path.exists(cand):
+                        command[0] = cand
+                    else:
+                        found = shutil.which(exe)
+                        if found:
+                            command[0] = found
+                        else:
+                            self.log_manager.log(service_name, "ERROR", f"Executable not found: {exe}")
+                            return False
+                if len(command) > 1:
+                    arg1 = command[1]
+                    if isinstance(arg1, str) and not os.path.isabs(arg1):
+                        cand2 = os.path.join(base, arg1)
+                        if os.path.exists(cand2):
+                            command[1] = cand2
+            self.log_manager.log(service_name, "INFO", f"Exec: {command} cwd={cwd}")
+
+            # Windows: 隐藏子进程窗口
+            creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
+            startup_info = None
+            if os.name == "nt":
+                try:
+                    creation_flags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    si = subprocess.STARTUPINFO()
+                    si.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+                    si.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+                    startup_info = si
+                except Exception:
+                    pass
 
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                creationflags=creation_flags,
                 text=True,
                 cwd=cwd,
                 shell=False,
-                env=env
+                env=env,
+                startupinfo=startup_info
             )
             
             self.processes[service_name] = process
@@ -97,6 +136,21 @@ class ProcessManager:
             threading.Thread(target=self._read_output, args=(process.stderr, service_name, "ERROR"), daemon=True).start()
 
             return True
+        except FileNotFoundError as e:
+            exe_path = ""
+            try:
+                if isinstance(command, list) and command:
+                    exe_path = command[0]
+            except Exception:
+                pass
+            exists_flag = False
+            try:
+                if exe_path:
+                    exists_flag = os.path.exists(exe_path)
+            except Exception:
+                pass
+            self.log_manager.log(service_name, "ERROR", f"Failed to start service: {e}; cwd={cwd}; exe={exe_path}; exists={exists_flag}")
+            return False
         except Exception as e:
             self.log_manager.log(service_name, "ERROR", f"Failed to start service: {e}")
             return False

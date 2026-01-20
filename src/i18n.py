@@ -2,6 +2,7 @@ TRANSLATIONS = {
     "en": {
         "window_title": "Microservice Launcher",
         "init_error": "Initialization Error",
+        "loading": "Loading, please wait…",
         "service_list": "Service List",
         "start": "Start",
         "stop": "Stop",
@@ -11,6 +12,7 @@ TRANSLATIONS = {
         "system": "System",
         "clear_logs": "Clear Logs",
         "export": "Export",
+        "keyword": "Keyword",
         "start_all": "Start All (Sequential)",
         "stop_all": "Stop All",
         "reload_config": "Reload Config",
@@ -41,6 +43,7 @@ TRANSLATIONS = {
     "zh": {
         "window_title": "微服务启动器",
         "init_error": "初始化错误",
+        "loading": "正在加载，请稍候…",
         "service_list": "服务列表",
         "start": "启动",
         "stop": "停止",
@@ -50,6 +53,7 @@ TRANSLATIONS = {
         "system": "系统",
         "clear_logs": "清空日志",
         "export": "导出",
+        "keyword": "关键字",
         "start_all": "一键启动 (顺序)",
         "stop_all": "一键停止",
         "reload_config": "重载配置",
@@ -76,8 +80,21 @@ TRANSLATIONS = {
         "create_config": "新增配置",
         "select_config": "选择配置文件",
         "config_loaded": "配置加载成功。"
+        ,
+        "insert_win_service_dep": "插入 Windows 服务依赖",
+        "select_windows_service": "选择 Windows 服务",
+        "select_and_insert": "选择并插入",
+        "list_services_failed": "获取服务列表失败: {}"
     }
 }
+
+# Extend English keys to match new UI strings
+TRANSLATIONS["en"].update({
+    "insert_win_service_dep": "Insert Win Service Dep",
+    "select_windows_service": "Select Windows Service",
+    "select_and_insert": "Select & Insert",
+    "list_services_failed": "Failed to list services: {}",
+})
 
 class I18nManager:
     def __init__(self, initial_lang="zh"):

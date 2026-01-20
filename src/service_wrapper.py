@@ -77,6 +77,15 @@ class MicroserviceLauncherService(win32serviceutil.ServiceFramework):
             self.process_manager = ProcessManager(self.log_manager)
             self.starter = SequentialStarter(self.config_manager, self.process_manager, self.log_manager)
             self.monitor = ServiceMonitor(self.config_manager, self.process_manager, self.log_manager, self.starter)
+            try:
+                logs_dir = os.path.join(base_path, "logs")
+                os.makedirs(logs_dir, exist_ok=True)
+                self.log_manager.get_logger("System", os.path.join(logs_dir, "system.log"))
+                for s in self.config_manager.get_services():
+                    name = s["service_name"]
+                    self.log_manager.get_logger(name, os.path.join(logs_dir, f"{name}.log"))
+            except Exception:
+                pass
             
             # 启动所有服务
             # Start everything
