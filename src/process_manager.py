@@ -80,6 +80,16 @@ class ProcessManager:
                                 env[str(k)] = str(v)
                         else:
                             env[str(item)] = env.get(str(item), "")
+            # 标准化命令，确保 .bat/.cmd 通过 cmd.exe 执行，并提示 javaw
+            if isinstance(command, str) and command:
+                lower_cmd = command.lower()
+                if "javaw" in lower_cmd:
+                    try:
+                        self.log_manager.log(service_name, "WARN", "Detected 'javaw'. Stdout/stderr may not be captured. Use 'java' instead.")
+                    except Exception:
+                        pass
+                if lower_cmd.strip().endswith(".bat") or lower_cmd.strip().endswith(".cmd"):
+                    command = ["cmd", "/c", command]
             if isinstance(command, list) and command:
                 exe = command[0]
                 base = cwd or os.getcwd()
@@ -100,6 +110,38 @@ class ProcessManager:
                         cand2 = os.path.join(base, arg1)
                         if os.path.exists(cand2):
                             command[1] = cand2
+                try:
+                    low_exe = str(command[0]).lower()
+                    if low_exe.endswith(".bat") or low_exe.endswith(".cmd"):
+                        command = ["cmd", "/c"] + command
+                except Exception:
+                    pass
+            # 自动推断工作目录：若未显式提供，尝试使用命令中首个存在的文件路径所在目录
+            if cwd is None and isinstance(command, list):
+                try:
+                    for arg in command:
+                        if isinstance(arg, str):
+                            # 跳过系统命令
+                            low = arg.lower()
+                            if low in ("cmd", "/c", "powershell", "-command"):
+                                continue
+                            if os.path.isabs(arg) and os.path.isfile(arg):
+                                cwd = os.path.dirname(arg)
+                                break
+                            # 相对路径文件
+                            cand = os.path.join(os.getcwd(), arg)
+                            if os.path.isfile(cand):
+                                cwd = os.path.dirname(cand)
+                                break
+                            # 针对 java -jar <path.jar>
+                            if arg.endswith(".jar"):
+                                # 绝对或相对 jar 路径
+                                jar_path = arg if os.path.isabs(arg) else os.path.join(os.getcwd(), arg)
+                                if os.path.isfile(jar_path):
+                                    cwd = os.path.dirname(jar_path)
+                                    break
+                except Exception:
+                    pass
             self.log_manager.log(service_name, "INFO", f"Exec: {command} cwd={cwd}")
 
             # Windows: 隐藏子进程窗口
@@ -121,6 +163,8 @@ class ProcessManager:
                 stderr=subprocess.PIPE,
                 creationflags=creation_flags,
                 text=True,
+                errors="replace",
+                bufsize=1,
                 cwd=cwd,
                 shell=False,
                 env=env,
@@ -214,7 +258,6 @@ class ProcessManager:
                 if line:
                     self.log_manager.log(service_name, level, line.strip())
         except Exception as e:
-             # This might happen if process is killed abruptly
-             pass
+            self.log_manager.log(service_name, "WARN", f"Output reader interrupted: {e}")
         finally:
             pipe.close()

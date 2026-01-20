@@ -12,6 +12,38 @@ class LogManager:
         """
         self.loggers = {}
         self.gui_log_queue = queue.Queue() # Queue for GUI updates
+        try:
+            import logging as _logging
+            self._default_level = _logging.INFO
+        except Exception:
+            self._default_level = 20
+
+    def set_default_level(self, level_str):
+        try:
+            import logging as _logging
+            lvl = str(level_str).upper() if level_str is not None else "INFO"
+            if lvl in ("WARN", "WARNING"):
+                self._default_level = _logging.WARNING
+            elif lvl == "ERROR":
+                self._default_level = _logging.ERROR
+            elif lvl == "DEBUG":
+                self._default_level = _logging.DEBUG
+            else:
+                self._default_level = _logging.INFO
+        except Exception:
+            pass
+    def get_default_level_str(self):
+        try:
+            import logging as _logging
+            if self._default_level == _logging.DEBUG:
+                return "DEBUG"
+            if self._default_level == _logging.ERROR:
+                return "ERROR"
+            if self._default_level == _logging.WARNING:
+                return "WARN"
+            return "INFO"
+        except Exception:
+            return "INFO"
 
     def get_logger(self, service_name, log_path):
         """
@@ -22,7 +54,10 @@ class LogManager:
             return self.loggers[service_name]
 
         logger = logging.getLogger(service_name)
-        logger.setLevel(logging.INFO)
+        try:
+            logger.setLevel(self._default_level)
+        except Exception:
+            logger.setLevel(logging.INFO)
         
         # 确保日志目录存在
         # Ensure log directory exists
@@ -52,18 +87,27 @@ class LogManager:
         Log a message to file and queue for GUI.
         """
         logger = self.loggers.get(service_name)
+        normalized_level = "INFO"
+        if isinstance(level, str) and level:
+            normalized_level = level.upper()
         if logger:
-            if level == "INFO":
-                logger.info(message)
-            elif level == "ERROR":
-                logger.error(message)
-            elif level == "WARN":
-                logger.warning(message)
+            msg_str = str(message)
+            if normalized_level == "INFO":
+                logger.info(msg_str)
+            elif normalized_level == "ERROR":
+                logger.error(msg_str)
+            elif normalized_level in ("WARN", "WARNING"):
+                logger.warning(msg_str)
+            elif normalized_level == "DEBUG":
+                logger.debug(msg_str)
+            else:
+                logger.info(msg_str)
+            
         
         # 格式化 GUI 显示: 时间戳 | 服务 | 级别 | 消息
         # Format for GUI: Timestamp | Service | Level | Message
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-        formatted_msg = f"[{timestamp}] [{service_name}] [{level}] {message}"
+        formatted_msg = f"[{timestamp}] [{service_name}] [{normalized_level}] {message}"
         self.gui_log_queue.put((service_name, formatted_msg))
 
     def get_gui_logs(self):

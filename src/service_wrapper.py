@@ -74,6 +74,21 @@ class MicroserviceLauncherService(win32serviceutil.ServiceFramework):
         try:
             self.config_manager = ServiceConfig()
             self.log_manager = LogManager()
+            try:
+                conf_dir = os.path.join(base_path, "conf")
+                config_json = os.path.join(conf_dir, "config.json")
+                if os.path.exists(config_json):
+                    try:
+                        import json as _json
+                        with open(config_json, "r", encoding="utf-8") as f:
+                            cfg = _json.load(f)
+                            lv = str(cfg.get("log_level", "")).upper()
+                            if lv in ["DEBUG", "INFO", "WARN", "WARNING", "ERROR"]:
+                                self.log_manager.set_default_level(lv)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             self.process_manager = ProcessManager(self.log_manager)
             self.starter = SequentialStarter(self.config_manager, self.process_manager, self.log_manager)
             self.monitor = ServiceMonitor(self.config_manager, self.process_manager, self.log_manager, self.starter)

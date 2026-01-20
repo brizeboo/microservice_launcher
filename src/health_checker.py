@@ -48,12 +48,12 @@ class HealthChecker:
             return HealthChecker.check_port(
                 config.get("host", "127.0.0.1"),
                 config.get("port"),
-                config.get("timeout", 5)
+                5
             )
         elif check_type == "http":
             return HealthChecker.check_http(
                 config.get("url"),
-                config.get("timeout", 5),
+                5,
                 config.get("expected_code", 200)
             )
         elif check_type == "none":

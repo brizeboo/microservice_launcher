@@ -12,7 +12,9 @@
       "health_check_config": {
         "host": "127.0.0.1",
         "port": 8080,
-        "timeout": 5
+        "retries": 30,
+        "interval": 1,
+        "start_period": 5
       },
       "restart": "always",
       "max_restart_times": 5,
@@ -30,8 +32,10 @@
       "health_check_type": "http",
       "health_check_config": {
         "url": "http://127.0.0.1:5000/health",
-        "timeout": 5,
-        "expected_code": 200
+        "expected_code": 200,
+        "retries": 20,
+        "interval": 1,
+        "start_period": 5
       },
       "restart": "on-failure",
       "max_restart_times": 3

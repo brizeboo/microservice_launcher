@@ -41,15 +41,17 @@ Tkinter 界面更新需使用 after() 方法（避免线程安全问题）；
       "start_order": 1,          // 启动顺序（数字越小越先启动）
       "health_check_type": "port",// 健康检查类型：port/http/none
       "health_check_config": {   // 健康检查配置（按需定义）
-        "host": "127.0.0.1",
-        "port": 8080,
-        "timeout": 5
+        "host": "127.0.0.1",         // 目标主机
+        "port": 8080,                // 目标端口
+        "retries": 30,               // 失败重试次数（宽限期后计数）
+        "interval": 1,               // 检查间隔（秒，支持小数）
+        "start_period": 5            // 启动宽限期（秒，期间失败不计数）
       },
       "environment": {          // 环境变量
         "PORT": "8080",
         "DEBUG": "1"
       },
-      "auto_restart": true,      // 是否开启自动重启
+      "restart": "always",       // 自动重启策略：always/unless-stopped/on-failure
       "max_restart_times": 5,    // 最大重启次数（0=无限）
       "restart_interval": 3      // 重启间隔（秒）
     },
@@ -61,14 +63,16 @@ Tkinter 界面更新需使用 after() 方法（避免线程安全问题）；
       "health_check_type": "http",
       "health_check_config": {
         "url": "http://127.0.0.1:8081/health",
-        "timeout": 5,
-        "expected_code": 200
+        "expected_code": 200,
+        "retries": 20,
+        "interval": 1,
+        "start_period": 5
       },
       "environment": [
         "API_URL=http://127.0.0.1:8081",
         "DEBUG=1"
       ],
-      "auto_restart": true,
+      "restart": "on-failure",
       "max_restart_times": 3,
       "restart_interval": 5
     }
@@ -96,7 +100,7 @@ Tkinter 文本框支持「按服务筛选」「清空当前日志」「导出日
 日志输出带时间戳、服务名称、日志级别（INFO/ERROR/WARN）；
 性能优化：日志写入使用缓冲区，避免高频 IO 阻塞；界面日志仅保留最近 1000 行，超出自动清理。
 模块 5：自动重启
-触发条件：进程检测到服务退出（PID 不存在）且 auto_restart=true；
+触发条件：进程检测到服务退出（PID 不存在）且 `restart` 策略允许（`always`/`unless-stopped`/`on-failure`）；
 限制逻辑：
 累计重启次数达到 max_restart_times 时，停止自动重启并弹窗告警；
 两次重启间隔不小于 restart_interval 秒，避免高频重启；
@@ -106,7 +110,7 @@ Tkinter 文本框支持「按服务筛选」「清空当前日志」「导出日
 端口检测（port）：通过 socket 连接指定 host:port，能连接则判定健康；
 HTTP 接口检测（http）：调用指定 URL，返回码匹配 expected_code 则判定健康；
 无检测（none）：仅通过进程是否存活判定健康；
-检测频率：每 5 秒执行一次健康检查；
+检测频率：监控循环每 1 秒执行一次健康检查；顺序启动阶段按 `health_check_config.interval` 控制检查间隔。
 结果处理：检查失败时标记服务状态为「异常」，并在日志中记录失败原因（如「端口 8080 连接超时」「HTTP 接口返回 500」）。
 模块 7：按健康状态顺序启动
 核心逻辑：

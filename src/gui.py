@@ -33,23 +33,16 @@ class ServiceLauncherGUI:
         os.makedirs(self.conf_dir, exist_ok=True)
         self.logs_dir = os.path.join(exe_dir, "logs")
         os.makedirs(self.logs_dir, exist_ok=True)
-        self.last_config_dat = os.path.join(self.conf_dir, "last_config.dat") 
-        lang_loaded = self._load_language_from_bat()
+        self.config_json = os.path.join(self.conf_dir, "config.json")
+        cfg = self._load_app_config()
+        lang_loaded = cfg.get("lang")
         self.initial_lang = lang_loaded if lang_loaded in ["en", "zh"] else "zh"
         i18n.set_language(self.initial_lang)
         self.root.title(i18n.get("window_title"))
         self.root.geometry("1000x700")
 
         self.default_config_path = os.path.join(self.conf_dir, "services.json")
-        initial_config_path = config_path
-        if not initial_config_path and os.path.exists(self.last_config_dat):
-            try:
-                with open(self.last_config_dat, "r", encoding="utf-8") as f:
-                    p = f.read().strip()
-                    if p:
-                        initial_config_path = p
-            except Exception:
-                initial_config_path = None
+        initial_config_path = config_path if config_path else cfg.get("last_config_path")
         if not initial_config_path or not os.path.exists(initial_config_path):
             if not os.path.exists(self.default_config_path):
                 default_config = {
@@ -64,21 +57,15 @@ class ServiceLauncherGUI:
                 with open(self.default_config_path, "w", encoding="utf-8") as f:
                     json.dump(default_config, f, indent=2, ensure_ascii=False)
             initial_config_path = self.default_config_path
-            try:
-                with open(self.last_config_dat, "w", encoding="utf-8") as f:
-                    f.write(initial_config_path)
-            except Exception:
-                pass
-        try:
-            with open(self.last_config_dat, "w", encoding="utf-8") as f:
-                f.write(initial_config_path)
-        except Exception:
-            pass
+        self._save_app_config({"last_config_path": initial_config_path}, merge=True)
 
         # Initialize Managers
         try:
             self.config_manager = ServiceConfig(initial_config_path)
             self.log_manager = LogManager()
+            lvl = cfg.get("log_level")
+            if lvl:
+                self.log_manager.set_default_level(lvl)
             self.process_manager = ProcessManager(self.log_manager)
             self.starter = SequentialStarter(self.config_manager, self.process_manager, self.log_manager)
             self.monitor = ServiceMonitor(self.config_manager, self.process_manager, self.log_manager, self.starter)
@@ -299,9 +286,9 @@ class ServiceLauncherGUI:
 
     def _load_language_from_bat(self):
         try:
-            if not os.path.exists(self.last_config_bat):
+            if not os.path.exists(self.last_config_dat):
                 return None
-            with open(self.last_config_bat, "r", encoding="utf-8") as f:
+            with open(self.last_config_dat, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line.lower().startswith("set "):
@@ -319,10 +306,50 @@ class ServiceLauncherGUI:
     def _save_language_to_bat(self):
         try:
             content = "@echo off\nset LANG={}".format(self.lang_var.get())
-            with open(self.last_config_bat, "w", encoding="utf-8") as f:
+            with open(self.last_config_dat, "w", encoding="utf-8") as f:
                 f.write(content)
         except Exception:
             pass
+    def _load_app_config(self):
+        try:
+            if not os.path.exists(self.config_json):
+                return {}
+            with open(self.config_json, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    def _save_app_config(self, data, merge=True):
+        try:
+            base = {}
+            if merge:
+                base = self._load_app_config()
+                if not isinstance(base, dict):
+                    base = {}
+            if not isinstance(data, dict):
+                return
+            base.update(data)
+            with open(self.config_json, "w", encoding="utf-8") as f:
+                json.dump(base, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+    def _load_log_level_from_dat(self):
+        try:
+            if not os.path.exists(self.last_config_dat):
+                return None
+            with open(self.last_config_dat, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.lower().startswith("set "):
+                        kv = line[4:].strip()
+                        if "=" in kv:
+                            k, v = kv.split("=", 1)
+                            if k.strip().upper() == "LOG_LEVEL":
+                                lv = v.strip().upper()
+                                if lv in ["DEBUG", "INFO", "WARN", "WARNING", "ERROR"]:
+                                    return lv
+            return None
+        except Exception:
+            return None
 
     def _import_config(self):
         """
@@ -342,8 +369,7 @@ class ServiceLauncherGUI:
                 self._update_config_buttons_state()
                 messagebox.showinfo(i18n.get("info"), i18n.get("config_loaded"))
                 try:
-                    with open(self.last_config_dat, "w", encoding="utf-8") as f:
-                        f.write(file_path)
+                    self._save_app_config({"last_config_path": file_path}, merge=True)
                 except Exception:
                     pass
             except Exception as e:
@@ -407,7 +433,7 @@ class ServiceLauncherGUI:
         new_lang = self.lang_var.get()
         i18n.set_language(new_lang)
         self._refresh_ui_text()
-        self._save_language_to_bat()
+        self._save_app_config({"lang": new_lang}, merge=True)
 
     def _refresh_ui_text(self):
         """
@@ -734,31 +760,37 @@ class ServiceLauncherGUI:
         安装 Windows 服务。
         Install Windows Service.
         """
-        # 如果是源码运行，优先使用脚本，因为它可以处理环境问题
-        # If running from source, prefer the batch script as it handles environment better
-        if not getattr(sys, 'frozen', False):
-            script_path = os.path.join(os.getcwd(), "scripts", "register_service.bat")
+        if not messagebox.askyesno(i18n.get("info"), i18n.get("confirm_install_stop_all")):
+            return
+        self._stop_all()
+        start_time = time.time()
+        while True:
+            all_stopped = True
+            for s in self.services:
+                status = self.monitor.get_status(s["service_name"])
+                if status in ("RUNNING", "STARTING"):
+                    all_stopped = False
+                    break
+            if all_stopped:
+                break
+            if time.time() - start_time > 30:
+                break
+            self.root.update_idletasks()
+            time.sleep(0.5)
+        script_candidates = [
+            os.path.join(os.getcwd(), "scripts", "register_service_nssm.bat"),
+            os.path.join(os.getcwd(), "register_service_nssm.bat"),
+        ]
+        for script_path in script_candidates:
             if os.path.exists(script_path):
                 try:
-                    # Run the batch file as admin
-                    # 批处理文件自己会处理提权，这里只需要运行它
-                    # The batch file handles elevation itself, just run it
                     os.startfile(script_path)
-                    # 给予更多时间，因为脚本有多个步骤
-                    # Give it more time as script has multiple steps
                     self.root.after(5000, self._check_service_installed)
                     return
                 except Exception as e:
                     self.log_manager.log("System", "ERROR", f"Failed to run batch script: {e}")
-                    # Fallback to default method
         
-        # Use --startup auto to ensure it starts on boot
-        if self._run_admin_command("install --startup auto"):
-            # We can't know for sure if it succeeded instantly as it's async process
-            # But we can check if service exists after a delay
-            self.root.after(3000, self._check_service_installed)
-        else:
-            messagebox.showerror(i18n.get("error"), i18n.get("service_action_failed", "Privilege elevation failed"))
+        messagebox.showerror(i18n.get("error"), i18n.get("service_action_failed", "NSSM 脚本缺失：请将 register_service_nssm.bat 放置到 scripts 或同级目录"))
 
     def _uninstall_service(self):
         """
@@ -768,10 +800,11 @@ class ServiceLauncherGUI:
         if not messagebox.askyesno(i18n.get("info"), i18n.get("confirm_uninstall")):
             return
             
-        # 如果是源码运行，优先使用脚本
-        # If running from source, prefer the batch script
-        if not getattr(sys, 'frozen', False):
-            script_path = os.path.join(os.getcwd(), "scripts", "unregister_service.dat")
+        script_candidates = [
+            os.path.join(os.getcwd(), "scripts", "unregister_service_nssm.bat"),
+            os.path.join(os.getcwd(), "unregister_service_nssm.bat"),
+        ]
+        for script_path in script_candidates:
             if os.path.exists(script_path):
                 try:
                     os.startfile(script_path)
@@ -779,16 +812,8 @@ class ServiceLauncherGUI:
                     return
                 except Exception as e:
                     self.log_manager.log("System", "ERROR", f"Failed to run batch script: {e}")
-                    # Fallback
             
-        # First stop it just in case
-        self._run_admin_command("stop")
-        time.sleep(1) 
-        
-        if self._run_admin_command("remove"):
-            self.root.after(3000, self._check_service_uninstalled)
-        else:
-            messagebox.showerror(i18n.get("error"), i18n.get("service_action_failed", "Privilege elevation failed"))
+        messagebox.showerror(i18n.get("error"), i18n.get("service_action_failed", "NSSM 脚本缺失：请将 unregister_service_nssm.bat 放置到 scripts 或同级目录"))
 
     def _check_service_installed(self):
         """
@@ -887,6 +912,30 @@ class ServiceLauncherGUI:
         关闭应用程序并清理资源。
         Close the application and cleanup resources.
         """
+        try:
+            try:
+                lang = self.lang_var.get()
+            except Exception:
+                lang = None
+            try:
+                log_level = self.log_manager.get_default_level_str()
+            except Exception:
+                log_level = None
+            data = {}
+            if isinstance(lang, str) and lang:
+                data["lang"] = lang
+            if isinstance(log_level, str) and log_level:
+                data["log_level"] = log_level
+            try:
+                cfg_path = getattr(self.config_manager, "config_path", None)
+                if isinstance(cfg_path, str) and cfg_path:
+                    data["last_config_path"] = cfg_path
+            except Exception:
+                pass
+            if data:
+                self._save_app_config(data, merge=True)
+        except Exception:
+            pass
         self.running = False
         self.monitor.stop_monitoring()
         self.starter.stop_sequence()

@@ -41,9 +41,12 @@
           "health_check_type": "port",
           "health_check_config": {
             "host": "127.0.0.1",
-            "port": 8080
+            "port": 8080,
+            "retries": 30,
+            "interval": 1,
+            "start_period": 5
           },
-          "auto_restart": true,
+          "restart": "always",
           "max_restart_times": 5,
           "restart_interval": 3
         }
@@ -76,4 +79,19 @@
 
 *   请确保启动命令或脚本路径正确且具有执行权限。
 *   `health_check_type` 支持 `port` (端口), `http` (HTTP接口), `none` (仅进程检查)。
+*   健康检查网络超时固定为 5 秒；可通过 `health_check_config.retries`（失败重试次数）、`interval`（检查间隔，秒，支持小数）、`start_period`（启动宽限期，失败不计数）控制等待策略。
+*   自动重启策略使用 `restart` 字段（`always`/`unless-stopped`/`on-failure`），配合 `max_restart_times` 与 `restart_interval` 控制重启次数与间隔。
 *   日志文件会自动按天切割，保留最近 7 天的日志。
+
+## 作为 Windows 服务运行（方案2：NSSM）
+
+- 准备 NSSM：将 `nssm.exe` 放到 `scripts` 或 `scripts\vendor\nssm\`，或确保在系统 PATH 中。
+- 以管理员运行注册脚本：
+  - `scripts\register_service_nssm.bat`
+- 卸载服务：
+  - `scripts\unregister_service_nssm.bat`
+- 脚本行为：
+  - 自动查找 `dist` 目录中最新的 `ServiceLauncher_v2*.exe` 作为可执行文件。
+  - 设置服务名称为 `MicroserviceLauncher`，启动类型为自动。
+  - 日志输出到 `logs\service_launcher_nssm.out.log` 与 `logs\service_launcher_nssm.err.log`。
+  - 工作目录为项目根目录，便于读取 `services_config.json` 与 `conf\config.json`。

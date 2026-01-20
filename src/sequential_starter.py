@@ -87,6 +87,68 @@ class SequentialStarter:
                 break
 
             name = service["service_name"]
+            deps = service.get("depends_on", [])
+            if isinstance(deps, str):
+                deps = [deps]
+            if deps:
+                self.log_manager.log("System", "INFO", f"Waiting for dependencies of {name}: {deps}")
+                all_ok = True
+                for dep_name in deps:
+                    if self.stop_flag:
+                        all_ok = False
+                        break
+                    dep_cfg = self.service_config.get_service_by_name(dep_name)
+                    if not dep_cfg:
+                        self.log_manager.log("System", "WARN", f"Dependency '{dep_name}' not found in config. Continuing without waiting.")
+                        continue
+                    dep_check_type = dep_cfg.get("health_check_type", "none")
+                    dep_check_cfg = dep_cfg.get("health_check_config", {})
+                    if dep_check_type == "none":
+                        wait_ok = False
+                        dep_retries = int(dep_check_cfg.get("retries", 30))
+                        dep_interval = max(0.1, float(dep_check_cfg.get("interval", 1)))
+                        dep_start_period = max(0.0, float(dep_check_cfg.get("start_period", 0)))
+                        start_ts = time.time()
+                        attempts = 0
+                        while attempts < dep_retries:
+                            if self.stop_flag:
+                                break
+                            if self.process_manager.is_process_running(dep_name):
+                                wait_ok = True
+                                break
+                            if time.time() - start_ts >= dep_start_period:
+                                attempts += 1
+                            time.sleep(dep_interval)
+                        if not wait_ok and not self.stop_flag:
+                            self.log_manager.log("System", "ERROR", f"Dependency '{dep_name}' not running. Stopping sequence.")
+                            all_ok = False
+                            break
+                        else:
+                            self.log_manager.log("System", "INFO", f"Dependency '{dep_name}' is running.")
+                    else:
+                        dep_ok = False
+                        dep_retries = int(dep_check_cfg.get("retries", 60))
+                        dep_interval = max(0.1, float(dep_check_cfg.get("interval", 1)))
+                        dep_start_period = max(0.0, float(dep_check_cfg.get("start_period", 0)))
+                        start_ts = time.time()
+                        attempts = 0
+                        while attempts < dep_retries:
+                            if self.stop_flag:
+                                break
+                            ok, msg = HealthChecker.check(dep_check_type, dep_check_cfg)
+                            if ok:
+                                dep_ok = True
+                                self.log_manager.log("System", "INFO", f"Dependency '{dep_name}' healthy: {msg}")
+                                break
+                            if time.time() - start_ts >= dep_start_period:
+                                attempts += 1
+                            time.sleep(dep_interval)
+                        if not dep_ok and not self.stop_flag:
+                            self.log_manager.log("System", "ERROR", f"Dependency '{dep_name}' failed health check. Stopping sequence.")
+                            all_ok = False
+                            break
+                if not all_ok:
+                    break
             
             win_dep = service.get("windows_service_dependency")
             if win_dep:
@@ -121,10 +183,13 @@ class SequentialStarter:
             if health_type != "none":
                 self.log_manager.log("System", "INFO", f"Waiting for {name} to be healthy...")
                 is_healthy = False
-                retries = 20 # Wait up to 20 * 1 = 20 seconds? Or make it configurable. 
-                # Requirements say "Wait until healthy", let's use a reasonable timeout loop
+                retries = int(health_config.get("retries", 20))
+                interval = max(0.1, float(health_config.get("interval", 1)))
+                start_period = max(0.0, float(health_config.get("start_period", 0)))
+                start_ts = time.time()
+                attempts = 0
                 
-                for _ in range(retries):
+                while attempts < retries:
                     if self.stop_flag: break
                     
                     is_ok, msg = HealthChecker.check(health_type, health_config)
@@ -132,7 +197,9 @@ class SequentialStarter:
                         self.log_manager.log(name, "INFO", f"Health Check Passed: {msg}")
                         is_healthy = True
                         break
-                    time.sleep(1)
+                    if time.time() - start_ts >= start_period:
+                        attempts += 1
+                    time.sleep(interval)
                 
                 if not is_healthy and not self.stop_flag:
                     self.log_manager.log("System", "ERROR", f"{name} failed health check. Stopping sequence.")
