@@ -1,7 +1,6 @@
 <div align="center">
-
 # MicroService Launcher
-
+<img src="scripts/assets/logo2.png" alt="MicroService Launcher Logo" width="96" />
 基于 Python + Tkinter 的图形化微服务启动与监控工具
 
 [![Python](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/)
@@ -10,6 +9,7 @@
 [![Packager](https://img.shields.io/badge/Build-PyInstaller-795548.svg)](#)
 
 </div>
+
 
 ---
 
@@ -21,6 +21,7 @@
 - [服务配置](#服务配置)
 - [一键打包 EXE](#一键打包-exe)
 - [作为 Windows 服务运行](#作为-windows-服务运行)
+- [界面截图](#界面截图)
 - [项目结构](#项目结构)
 - [常见问题](#常见问题)
 
@@ -114,6 +115,11 @@ pyinstaller --clean scripts/MicroServiceLauncher.spec
   - 服务名 `MicroserviceLauncher`，启动类型为自动
   - 日志输出至 `logs/service_launcher_nssm.out.log` 与 `logs/service_launcher_nssm.err.log`
   - 工作目录为项目根，便于读取 `conf/services.json`
+
+## 界面截图
+<p align="center">
+  <img src="scripts/assets/screen.png" alt="界面截图" />
+</p>
 
 ## 项目结构
 - 核心入口：[main.py](file:///d:/research/microservice_launcher/src/main.py)
