@@ -15,7 +15,7 @@ from service_monitor import ServiceMonitor
 class MicroserviceLauncherService(win32serviceutil.ServiceFramework):
     _svc_name_ = "MicroserviceLauncher"
     _svc_display_name_ = "Microservice Launcher Service"
-    _svc_description_ = "Manages microservices defined in services_config.json"
+    _svc_description_ = "Manages microservices defined in services.json"
 
     def __init__(self, args):
         """

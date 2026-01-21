@@ -8,28 +8,28 @@ GUI 框架：Tkinter（Python 内置，无需额外安装）
 进程管理：subprocess（启动 / 管理 bat 进程）、psutil（进程状态检查、PID 监控）
 异步 / 定时任务：threading（避免阻塞 GUI 主线程）、time（定时检测）
 日志处理：Python 内置 logging 模块（文件日志）+ Tkinter 文本框（实时展示）
-配置管理：JSON 文件（存储微服务配置，如 bat 路径、健康检查规则、启动顺序等）
+配置管理：JSON 文件（存储微服务配置，如 bat 路径、健康检查规则、依赖关系等）
 健康检测扩展：可选 requests（HTTP 接口检测）、socket（端口检测）
 2. 安装包
-- 完整可运行的 Python 可执行程序（.exe 文件）；
-- 示例 services_config.json 配置文件；
-- 简单的使用说明（如配置修改、启动工具的命令）；
+ - 完整可运行的 Python 可执行程序（.exe 文件）；
+ - 示例 services.json 配置文件；
+ - 简单的使用说明（如配置修改、启动工具的命令）；
 
 ## 三、核心功能拆解与实现要求
 1. 基础 UI 框架设计
 布局要求
 区域	功能描述
-左侧服务列表	展示所有微服务名称、健康状态（颜色区分：绿色 = 健康、黄色 = 启动中、红色 = 异常、灰色 = 停止）、启动顺序、操作按钮（单个启动 / 停止 / 重启）
+左侧服务列表	展示所有微服务名称、健康状态（颜色区分：绿色 = 健康、黄色 = 启动中、红色 = 异常、灰色 = 停止）、操作按钮（单个启动 / 停止 / 重启）
 右侧日志面板	分服务展示日志（支持切换服务、清空日志、导出日志），实时刷新输出
 底部操作栏	批量操作按钮（启动全部、停止全部、重启全部）、配置刷新按钮、日志级别筛选
 交互要求
 服务状态实时更新（每秒刷新一次）；
 Tkinter 界面更新需使用 after() 方法（避免线程安全问题）；
 操作按钮点击后有状态反馈（如加载提示、执行结果弹窗）；
-支持拖拽 / 手动修改微服务启动顺序。
+（按依赖顺序自动启动）
 2. 核心功能模块实现规范
 模块 1：配置管理（JSON 配置文件）
-配置文件路径：工具根目录 services_config.json；
+配置文件路径：工具根目录 services.json；
 配置项格式（每个微服务一个节点）：
 ``` json
 {
@@ -38,7 +38,7 @@ Tkinter 界面更新需使用 after() 方法（避免线程安全问题）；
       "service_name": "基础服务A",
       "command": "D:/microservice/A/start.bat",
       "working_dir": "D:/microservice/A",
-      "start_order": 1,          // 启动顺序（数字越小越先启动）
+      // 已移除 start_order，按 depends_on 拓扑顺序启动
       "health_check_type": "port",// 健康检查类型：port/http/none
       "health_check_config": {   // 健康检查配置（按需定义）
         "host": "127.0.0.1",         // 目标主机
@@ -59,7 +59,7 @@ Tkinter 界面更新需使用 after() 方法（避免线程安全问题）；
       "service_name": "业务服务B",
       "command": "D:/microservice/B/start.bat",
       "working_dir": "D:/microservice/B",
-      "start_order": 2,
+      // 已移除 start_order，按 depends_on 拓扑顺序启动
       "health_check_type": "http",
       "health_check_config": {
         "url": "http://127.0.0.1:8081/health",
@@ -114,7 +114,7 @@ HTTP 接口检测（http）：调用指定 URL，返回码匹配 expected_code �
 结果处理：检查失败时标记服务状态为「异常」，并在日志中记录失败原因（如「端口 8080 连接超时」「HTTP 接口返回 500」）。
 模块 7：按健康状态顺序启动
 核心逻辑：
-读取配置中的 start_order，按数字升序排序微服务；
+按 depends_on 执行拓扑排序确定启动顺序；
 先启动第 1 个服务，持续检测其健康状态；
 第 1 个服务「健康」后，再启动第 2 个服务，以此类推；
 若某服务启动失败 / 健康检查失败，暂停后续服务启动，弹窗提示并记录日志；
@@ -129,7 +129,7 @@ python
 | ProcessManager     | 进程管理类（启动/停止/检查 bat 进程） |
 | HealthChecker      | 健康检查类（端口/HTTP 检测） |
 | LogManager         | 日志管理类（文件存储+界面展示） |
-| ServiceLauncherGUI | GUI 主类（Tkinter 界面+交互逻辑） |
+| MicroServiceLauncherGUI | GUI 主类（Tkinter 界面+交互逻辑） |
 | SequentialStarter  | 顺序启动类（按健康状态控制启动流程） |
 2. 关键约束
 Tkinter 界面更新：所有 UI 操作（如文本框插入、按钮状态修改）必须在主线程执行，子线程通过 root.after(0, callback) 触发更新；
@@ -155,7 +155,7 @@ Tkinter 界面更新：所有 UI 操作（如文本框插入、按钮状态修�
 ## 六、交付物要求
 完整可运行的 Python 代码（含所有依赖类 / 函数）；
 完整可运行的 Python 可执行程序（.exe 文件）；
-示例 services_config.json 配置文件；
+示例 services.json 配置文件；
 简单的使用说明（如配置修改、启动工具的命令）；
 代码注释覆盖率 ≥ 80%（核心函数 / 类必须有详细注释）。
 ## 总结

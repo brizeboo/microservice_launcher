@@ -17,7 +17,7 @@ from health_checker import HealthChecker
 from i18n import i18n
 from service_monitor import ServiceMonitor
 
-class ServiceLauncherGUI:
+class MicroServiceLauncherGUI:
     def __init__(self, root, config_path=None):
         """
         初始化 GUI 应用程序。
@@ -474,9 +474,8 @@ class ServiceLauncherGUI:
         手动启动服务。
         Manually start a service.
         """
-        service = self.config_manager.get_service_by_name(service_name)
-        if service:
-            threading.Thread(target=self.process_manager.start_service, args=(service,), daemon=True).start()
+        if self.starter:
+            self.starter.start_with_dependencies(service_name)
 
     def _manual_stop(self, service_name):
         """

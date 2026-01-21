@@ -32,9 +32,9 @@ VSVersionInfo(
         [StringStruct(u'CompanyName', u'sykc'),
         StringStruct(u'FileDescription', u'Microservice Launcher Service'),
         StringStruct(u'FileVersion', u'1.0.0.0'),
-        StringStruct(u'InternalName', u'ServiceLauncher'),
+        StringStruct(u'InternalName', u'MicroServiceLauncher'),
         StringStruct(u'LegalCopyright', u'Copyright (c) 2024 sykc'),
-        StringStruct(u'OriginalFilename', u'ServiceLauncher.exe'),
+        StringStruct(u'OriginalFilename', u'MicroServiceLauncher.exe'),
         StringStruct(u'ProductName', u'Microservice Launcher'),
         StringStruct(u'ProductVersion', u'1.0.0.0')])
       ]),

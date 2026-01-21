@@ -4,7 +4,7 @@ import sys
 import os
 import signal
 import time
-from gui import ServiceLauncherGUI
+from gui import MicroServiceLauncherGUI
 from i18n import i18n
 from config_manager import ServiceConfig
 from log_manager import LogManager
@@ -219,9 +219,7 @@ def run_gui(config_path=None):
     logo_img = None
     logo_path_candidates = [
         os.path.join(exe_dir, "app_logo.png"),
-        os.path.join(conf_dir, "app_logo.png"),
         os.path.join(exe_dir, "logo.png"),
-        os.path.join(conf_dir, "logo.png"),
         os.path.join(exe_dir, "scripts", "assets", "logo2.png"),
     ]
     for p in logo_path_candidates:
@@ -244,7 +242,7 @@ def run_gui(config_path=None):
     pb.pack()
     pb.start(10)
     splash.update_idletasks()
-    app = ServiceLauncherGUI(root, config_path=config_path)
+    app = MicroServiceLauncherGUI(root, config_path=config_path)
     splash.destroy()
     root.protocol("WM_DELETE_WINDOW", app.on_close)
     root.deiconify()

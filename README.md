@@ -24,7 +24,7 @@
     ```
 
 2.  **配置服务**
-    修改根目录下的 `services_config.json` 文件。
+    修改根目录下的 `services.json` 文件。
     
     配置示例：
     ```json
@@ -73,7 +73,7 @@
 *   `health_checker.py`: 健康检查模块。
 *   `log_manager.py`: 日志管理模块。
 *   `sequential_starter.py`: 顺序启动逻辑。
-*   `services_config.json`: 配置文件。
+*   `services.json`: 配置文件。
 
 ## 注意事项
 
@@ -91,7 +91,7 @@
 - 卸载服务：
   - `scripts\unregister_service_nssm.bat`
 - 脚本行为：
-  - 自动查找 `dist` 目录中最新的 `ServiceLauncher_v2*.exe` 作为可执行文件。
+  - 自动查找 `dist` 目录中最新的 `MicroServiceLauncher_v2*.exe` 作为可执行文件。
   - 设置服务名称为 `MicroserviceLauncher`，启动类型为自动。
   - 日志输出到 `logs\service_launcher_nssm.out.log` 与 `logs\service_launcher_nssm.err.log`。
-  - 工作目录为项目根目录，便于读取 `services_config.json` 与 `conf\config.json`。
+  - 工作目录为项目根目录，便于读取 `services.json` 与 `conf\config.json`。

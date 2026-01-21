@@ -1,0 +1,25 @@
+{
+  "services": [
+    {
+      "service_name": "redis",
+      "command": [
+        "echo",
+        "redis"
+      ],
+      "working_dir": "D:\\research\\microservice_launcher",
+      "health_check_type": "none"
+    },
+    {
+      "service_name": "gateway",
+      "command": [
+        "echo",
+        "gateway"
+      ],
+      "working_dir": "D:\\research\\microservice_launcher",
+      "health_check_type": "none",
+      "depends_on": [
+        "   redis   "
+      ]
+    }
+  ]
+}

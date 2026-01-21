@@ -7,7 +7,7 @@ if not "%HTTPS_PROXY%"=="" set PIP_PROXY_OPTION=--proxy "%HTTPS_PROXY%"
 if "%PIP_PROXY_OPTION%"=="" if not "%HTTP_PROXY%"=="" set PIP_PROXY_OPTION=--proxy "%HTTP_PROXY%"
 
 echo ==========================================
-echo      ServiceLauncher Build Script
+echo      MicroServiceLauncher Build Script
 echo ==========================================
 
 REM 1. Check/Create Virtual Environment
@@ -62,7 +62,7 @@ echo [INFO] Building executable with PyInstaller...
 REM Using existing spec file for advanced configuration (version info, upx disabled)
 echo [INFO] Generating ICO from PNG...
 %VENV_DIR%\Scripts\python ..\scripts\convert_icon.py
-%VENV_DIR%\Scripts\python -m PyInstaller --clean ServiceLauncher.spec
+%VENV_DIR%\Scripts\python -m PyInstaller --clean MicroServiceLauncher.spec
 
 REM 5. Report Success
 if exist "dist\MicroServiceLauncher.exe" (
@@ -70,14 +70,12 @@ if exist "dist\MicroServiceLauncher.exe" (
     echo.
     echo [SUCCESS] Build completed successfully!
     if not exist "dist\conf" mkdir "dist\conf"
-    if exist "..\services_config.json" copy /Y "..\services_config.json" "dist\conf\services.json" >nul
-    if exist "..\services_config.example.json" copy /Y "..\services_config.example.json" "dist\conf\services_config.example.json" >nul
+    if exist "..\conf\services.example.json" copy /Y "..\conf\services.example.json" "dist\conf\services.example.json" >nul
     if exist "nssm.exe" copy /Y "nssm.exe" "dist\nssm.exe" >nul
     if exist "register_service_nssm.bat" copy /Y "register_service_nssm.bat" "dist\register_service_nssm.bat" >nul
     if exist "unregister_service_nssm.bat" copy /Y "unregister_service_nssm.bat" "dist\unregister_service_nssm.bat" >nul
     if exist "..\README.md" copy /Y "..\README.md" "dist\README.md" >nul
     if exist "..\scripts\assets\logo2.png" copy /Y "..\scripts\assets\logo2.png" "dist\app_logo.png" >nul
-    if exist "..\scripts\assets\logo2.png" copy /Y "..\scripts\assets\logo2.png" "dist\conf\app_logo.png" >nul
 ) else (
     echo.
     echo [ERROR] Build failed. Check the output above for errors.
