@@ -126,6 +126,7 @@ class SequentialStarter:
                             break
                         else:
                             self.log_manager.log("System", "INFO", f"Dependency '{dep_name}' is running.")
+                            time.sleep(dep_interval)
                     else:
                         dep_ok = False
                         dep_retries = int(dep_check_cfg.get("retries", 60))
@@ -140,6 +141,7 @@ class SequentialStarter:
                             if ok:
                                 dep_ok = True
                                 self.log_manager.log("System", "INFO", f"Dependency '{dep_name}' healthy: {msg}")
+                                time.sleep(dep_interval)
                                 break
                             if time.time() - start_ts >= dep_start_period:
                                 attempts += 1
@@ -266,6 +268,7 @@ class SequentialStarter:
                             break
                         else:
                             self.log_manager.log("System", "INFO", f"Dependency '{dep_name}' is running.")
+                            time.sleep(dep_interval)
                     else:
                         dep_ok = False
                         dep_retries = int(dep_check_cfg.get("retries", 60))
@@ -280,6 +283,7 @@ class SequentialStarter:
                             if ok:
                                 dep_ok = True
                                 self.log_manager.log("System", "INFO", f"Dependency '{dep_name}' healthy: {msg}")
+                                time.sleep(dep_interval)
                                 break
                             if time.time() - start_ts >= dep_start_period:
                                 attempts += 1

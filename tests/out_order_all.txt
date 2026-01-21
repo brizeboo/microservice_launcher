@@ -1,1 +1,1 @@
-redis,nacos,gateway,nginx
+redis,nacos
