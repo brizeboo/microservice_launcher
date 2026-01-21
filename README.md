@@ -1,6 +1,9 @@
 <div align="center">
-# MicroService Launcher
+
 <img src="scripts/assets/logo2.png" alt="MicroService Launcher Logo" width="96" />
+
+# MicroService Launcher
+
 基于 Python + Tkinter 的图形化微服务启动与监控工具
 
 [![Python](https://img.shields.io/badge/Python-3.12%2B-blue.svg)](https://www.python.org/)
