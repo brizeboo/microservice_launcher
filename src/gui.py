@@ -899,7 +899,7 @@ class MicroServiceLauncherGUI:
             lbl = self.service_widgets.get(name, {}).get("status_lbl")
             if lbl:
                 color = "gray"
-                if status == "RUNNING": color = "green"
+                if status == "RUNNING": color = "#82B71E"
                 elif status == "STARTING": color = "yellow"
                 elif status == "ERROR": color = "red"
                 lbl.config(bg=color)
